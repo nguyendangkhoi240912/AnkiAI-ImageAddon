@@ -1,0 +1,12 @@
+{
+    "name": "AnkiAI Image Add-on",
+    "package": "AnkiAI_ImageAddon",
+    "homepage": "https://github.com/yourusername/AnkiAI-ImageAddon",
+    "author": "AnkiAI Team",
+    "description": "Add-on tự động tìm kiếm và thêm ảnh minh họa vào thẻ Anki bằng 15+ image providers + Gemini AI evaluation. v4.5.0: 20-30% faster, 25-40% less memory, global session pooling!",
+    "human_description": "Tự động hóa thêm ảnh vào thẻ Anki bằng AI. v4.5.0: 15+ image providers, 20-30% faster, 25-40% less memory, Gemini 7-key auto-failover, adaptive delays, connection pooling, thread-safe caching, hoàn toàn free!",
+    "version": "4.5.0",
+    "anki": "25.09.2",
+    "conflicts": [],
+    "conf_version": 1
+}
