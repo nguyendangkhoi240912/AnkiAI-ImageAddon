@@ -9,6 +9,10 @@ from aqt.qt import QMessageBox, QDialog
 import sys
 import os
 import logging
+import re
+import time
+import threading
+import traceback
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -35,7 +39,6 @@ class AddImageTask(ProcessingTask):
     """Task để tự động thêm ảnh vào từng thẻ - ✨ OPTIMIZED"""
     
     # ✨ OPTIMIZE: Pre-compile regex at class level (not per-note)
-    import re
     HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
     
     def __init__(self, ai_provider, image_handler_obj, vocab_field: str,
@@ -65,6 +68,7 @@ class AddImageTask(ProcessingTask):
             examples = note[self.examples_field].strip() if self.examples_field and self.examples_field in note else ""  # ✨ NEW
             
             if not vocabulary:
+                logger.warning(f"📌 Vocabulary field is empty")
                 return False, "Từ vựng trống"
             
             # ✨ OPTIMIZE: Use pre-compiled regex (not recompiled per note)
@@ -72,33 +76,40 @@ class AddImageTask(ProcessingTask):
             definition = AddImageTask.HTML_TAG_PATTERN.sub("", definition)
             examples = AddImageTask.HTML_TAG_PATTERN.sub("", examples)  # ✨ NEW
             
-            logger.info(f"[TASK] Processing: {vocabulary}")
+            logger.info(f"📌 Processing note: vocab='{vocabulary}'")
             
             # 2. Kiểm tra xem đã có ảnh không
             current_image = note[self.image_field] if self.image_field in note else ""
             if current_image and "<img" in current_image:
+                logger.info(f"📌 Image already exists for '{vocabulary}'")
                 return False, "Đã có ảnh"
             
             # 3. Gọi AI để lấy URL ảnh (cùng với examples)
-            logger.info(f"[TASK] Calling AI for '{vocabulary}'...")
+            logger.info(f"📌 Calling AI for '{vocabulary}'...")
             image_url = self.ai_provider.get_image_url(vocabulary, definition, examples)
             
             if not image_url:
+                logger.warning(f"📌 AI returned no image URL for '{vocabulary}'")
                 return False, "AI không tìm được ảnh"
             
+            logger.info(f"📌 Got image URL: {image_url[:80]}...")
+            
             # 4. Xử lý ảnh
+            logger.debug(f"📌 Processing image for '{vocabulary}'...")
             success, message = self.image_handler.process_image(
                 image_url, note, vocabulary, self.image_field
             )
             
+            logger.info(f"📌 Image processing result: success={success}, msg={message}")
+            
             if success:
-                # 5. Lưu note
-                try:
-                    note.flush()
-                    return True, f"Thêm ảnh thành công: {vocabulary}"
-                except Exception as e:
-                    return False, f"Lỗi lưu note: {str(e)}"
+                # ✨ NOTE: Do NOT call note.flush() here!
+                # The background processor will call col.update_note() + col.save()
+                # Using both flush() and update_note() causes conflicts in Anki 25.x
+                logger.info(f"✅ Note modified, will be saved by background processor: {vocabulary}")
+                return True, f"Thêm ảnh thành công: {vocabulary}"
             else:
+                logger.warning(f"📌 Image processing failed: {message}")
                 return False, message
         
         except APIError as e:
@@ -318,7 +329,6 @@ Tiếp tục?"""
     update_interval_ms = 500  # Update UI every 500ms
     
     def on_progress(current, total, message):
-        import time
         logger.debug(f"[PROGRESS] {current}/{total}: {message}")
         
         # Only update UI every update_interval_ms or on completion
@@ -377,11 +387,9 @@ Thất bại: {failed_count}"""
         
         # Refresh browser (use timer instead of delay parameter)
         def refresh_after_delay():
-            import time
             time.sleep(1)  # Wait 1 second for UI to settle
             browser.search()
         
-        import threading
         refresh_thread = threading.Thread(target=refresh_after_delay, daemon=True)
         refresh_thread.start()
     
@@ -418,11 +426,11 @@ def open_config_dialog():
     fresh_config = mw.addonManager.getConfig(config_manager.ADDON_MODULE)
     if fresh_config:
         config_manager.config = fresh_config
-        print(f"[open_config_dialog] Loaded fresh config from Anki")
+        logger.info(f"[open_config_dialog] Loaded fresh config from Anki")
     else:
-        print(f"[open_config_dialog] No config found, using defaults")
+        logger.info(f"[open_config_dialog] No config found, using defaults")
     
-    print(f"[open_config_dialog] Current config: {config_manager.get_all()}")
+    logger.debug(f"[open_config_dialog] Current config: {config_manager.get_all()}")
     
     config_dialog = ConfigDialog(mw, existing_config=config_manager.get_all())
     if config_dialog.exec() == QDialog.DialogCode.Accepted:
@@ -503,7 +511,6 @@ def setup_addon():
     
     except Exception as e:
         logger.error(f"[ADDON] Error during initialization: {e}")
-        import traceback
         traceback.print_exc()
 
 
@@ -516,16 +523,16 @@ def cleanup_addon():
         try:
             from .modules.image_providers import _ImageProviderSessionManager
             _ImageProviderSessionManager.close_all()
-            print("[ADDON] Image provider sessions closed (20-30% resource savings)")
+            logger.info("[ADDON] Image provider sessions closed (20-30% resource savings)")
         except Exception as e:
-            print(f"[ADDON] Warning: Could not close image provider sessions: {e}")
+            logger.error(f"[ADDON] Warning: Could not close image provider sessions: {e}")
         
         # Close HTTP session if image handler exists
         if image_handler and hasattr(image_handler, 'session'):
             try:
                 image_handler.session.close()
-            except:
-                pass
+            except Exception:
+                logger.debug("[ADDON] Could not close HTTP session")
             logger.info("[ADDON] HTTP session closed")
         
         # Stop background processor if running
@@ -545,10 +552,10 @@ def cleanup_addon():
         feature_db = None
         advanced_features = None
         
-        print("[ADDON] Cleanup completed")
+        logger.info("[ADDON] Cleanup completed")
     
     except Exception as e:
-        print(f"[ADDON] Cleanup error: {e}")
+        logger.error(f"[ADDON] Cleanup error: {e}")
 
 
 # === Đăng ký config action NGAY khi addon được load (trước khi mở profile) ===

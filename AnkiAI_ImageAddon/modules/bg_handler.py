@@ -53,6 +53,7 @@ class BackgroundProcessor:
             """Công việc chính ở background"""
             try:
                 total = len(note_ids)
+                logger.info(f"🚀 Starting background work: Processing {total} notes")
                 
                 for index, note_id in enumerate(note_ids):
                     if self.cancelled:
@@ -61,14 +62,23 @@ class BackgroundProcessor:
                     try:
                         # Lấy note từ database
                         note = col.get_note(note_id)
+                        logger.debug(f"📌 [{index + 1}/{total}] Retrieved note {note_id}: {note.keys()}")
                         
                         # Xử lý note
                         result = process_func(note)
                         results.append(result)
+                        success, message = result
+                        
+                        logger.info(f"📌 [{index + 1}/{total}] Process result: success={success}, msg={message}")
                         
                         # 🔧 FIX: Explicitly save note to database after processing
-                        if result[0]:  # Only save if successful
+                        if success:
+                            logger.debug(f"📌 [{index + 1}/{total}] Calling col.update_note() for note {note_id}")
+                            logger.debug(f"📌 [{index + 1}/{total}] Note fields before update: {dict(note)}")
                             col.update_note(note)
+                            logger.info(f"✅ [{index + 1}/{total}] Note {note_id} updated successfully")
+                        else:
+                            logger.warning(f"⚠️  [{index + 1}/{total}] Failed to process note {note_id}: {message}")
                         
                         # Cập nhật tiến trình
                         if on_progress:
@@ -76,9 +86,14 @@ class BackgroundProcessor:
                             on_progress(index + 1, total, progress_msg)
                     
                     except Exception as e:
-                        error_msg = f"Lỗi xử lý note {note_id}: {str(e)}"
+                        error_msg = f"❌ Lỗi xử lý note {note_id}: {str(e)}"
                         errors.append(error_msg)
-                        logger.error(error_msg)
+                        logger.error(error_msg, exc_info=True)
+                
+                # 🔧 Commit all changes to database
+                logger.info(f"💾 Saving database... (processed {total} notes)")
+                col.save()
+                logger.info(f"✅ Database saved successfully!")
                 
                 return {"results": results, "errors": errors}
             

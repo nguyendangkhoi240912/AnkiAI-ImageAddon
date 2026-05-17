@@ -9,6 +9,8 @@ from aqt.qt import QMessageBox, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComb
 from typing import List, Optional, Callable
 import functools
 import logging
+import requests
+import re
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -499,7 +501,6 @@ class ConfigDialog(QDialog):
         # Test Groq
         if groq_key:
             try:
-                import requests
                 response = requests.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={
@@ -524,7 +525,6 @@ class ConfigDialog(QDialog):
         # Test Gemini
         if gemini_key:
             try:
-                import requests
                 response = requests.post(
                     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
                     params={"key": gemini_key},
@@ -546,7 +546,6 @@ class ConfigDialog(QDialog):
         # Test Ollama
         if use_ollama:
             try:
-                import requests
                 response = requests.get(f"{ollama_url}/api/tags", timeout=3)
                 
                 if response.status_code == 200:
@@ -569,7 +568,6 @@ class ConfigDialog(QDialog):
         # Test Pexels
         if pexels_key:
             try:
-                import requests
                 response = requests.get(
                     "https://api.pexels.com/v1/search",
                     headers={"Authorization": pexels_key},
@@ -588,7 +586,6 @@ class ConfigDialog(QDialog):
         # Test Unsplash
         if unsplash_key:
             try:
-                import requests
                 response = requests.get(
                     "https://api.unsplash.com/search/photos",
                     headers={"Authorization": f"Client-ID {unsplash_key}"},
@@ -606,7 +603,6 @@ class ConfigDialog(QDialog):
         
         # Test Openverse (no API key needed)
         try:
-            import requests
             response = requests.get(
                 "https://api.openverse.engineering/v1/images",
                 params={"q": "test", "page_size": 1},
@@ -622,7 +618,6 @@ class ConfigDialog(QDialog):
         
         # Test Lorem Picsum (no API key needed)
         try:
-            import requests
             response = requests.get("https://picsum.photos/200/300", timeout=3, allow_redirects=False)
             if response.status_code in [200, 301, 302]:
                 results.append(("Lorem Picsum", "OK", True, "No API needed"))
@@ -633,7 +628,6 @@ class ConfigDialog(QDialog):
         
         # Test Library of Congress (no API key needed)
         try:
-            import requests
             response = requests.get("https://loc.gov/pictures/search/", 
                                    params={"q": "test", "fo": "json"}, timeout=5)
             if response.status_code == 200:
@@ -649,7 +643,6 @@ class ConfigDialog(QDialog):
         
         # Test Met Museum (no API key needed)
         try:
-            import requests
             response = requests.get("https://collectionapi.metmuseum.org/public/collection/v1/search",
                                    params={"q": "test"}, timeout=5)
             if response.status_code == 200:
@@ -663,7 +656,6 @@ class ConfigDialog(QDialog):
         europeana_key = self.europeana_input.text().strip() if hasattr(self, 'europeana_input') else ""
         if europeana_key:
             try:
-                import requests
                 response = requests.get("https://api.europeana.eu/record/v2/search.json",
                                        params={"wskey": europeana_key, "query": "test"},
                                        timeout=5)
@@ -900,7 +892,6 @@ def get_note_data(note) -> tuple:
         )
         
         # Loại bỏ HTML tags
-        import re
         vocabulary = re.sub(r"<[^>]+>", "", vocabulary).strip()
         definition = re.sub(r"<[^>]+>", "", definition).strip()
         
