@@ -145,7 +145,7 @@ class GeminiProvider(AIProvider):
             raise AIProviderError("Gemini API key không được cấu hình")
         
         self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
-        self.model = "gemini-2.5-flash"
+        self.model = "gemini-3.1-flash-lite"
         self.name = "Gemini"
         self.session = _SessionManager.get_session("gemini")
     
@@ -537,7 +537,7 @@ class GeminiImageEvaluator:
             raise AIProviderError("At least one Gemini API key required for image evaluation")
         
         self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
-        self.model = "gemini-2.5-flash"
+        self.model = "gemini-3.1-flash-lite"
         self.name = "GeminiImageEvaluator"
         self.session = _SessionManager.get_session("gemini_eval")
         
