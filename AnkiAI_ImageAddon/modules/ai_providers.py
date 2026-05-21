@@ -15,6 +15,7 @@ import requests
 import json
 import logging
 import re
+from dataclasses import dataclass, field
 from typing import Optional, List, Tuple, Dict
 from abc import ABC, abstractmethod
 from requests.adapters import HTTPAdapter
@@ -30,6 +31,48 @@ logger = logging.getLogger(__name__)
 class AIProviderError(Exception):
     """Exception cho AI provider calls"""
     pass
+
+
+VALID_IMAGE_DOMAINS = frozenset({
+    "general",
+    "medical",
+    "chemistry",
+    "biology",
+    "taxonomy",
+    "dermatology",
+    "space",
+    "math",
+})
+
+
+@dataclass
+class SearchContext:
+    """AI-routed search context for image providers v5.0."""
+    keyword: str
+    domain: str = "general"
+    precise_term: str = ""
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "keyword": self.keyword,
+                "domain": self.domain,
+                "precise_term": self.precise_term or self.keyword,
+            }
+        )
+
+    @classmethod
+    def from_json(cls, raw: str) -> "SearchContext":
+        try:
+            data = json.loads(raw)
+            domain = data.get("domain", "general")
+            if domain not in VALID_IMAGE_DOMAINS:
+                domain = "general"
+            keyword = data.get("keyword", "")
+            precise = data.get("precise_term", keyword)
+            return cls(keyword=keyword, domain=domain, precise_term=precise)
+        except (json.JSONDecodeError, TypeError):
+            return cls(keyword=raw.strip(), domain="general", precise_term=raw.strip())
 
 
 # ⚡ Global session manager for connection pooling
@@ -97,6 +140,27 @@ Examples of good queries:
 
 Respond with ONLY the search query, nothing else."""
 
+SEARCH_CONTEXT_PROMPT = """You route vocabulary flashcards to the best image search APIs.
+
+Word: {vocabulary}
+Definition: {definition}
+{examples_section}
+Return ONE line of JSON only (no markdown):
+{{"domain": "<domain>", "keyword": "<2-4 English words for image search>", "precise_term": "<exact scientific name, formula, species, or drug name if applicable; else same as keyword>"}}
+
+domain must be one of: general, medical, chemistry, biology, taxonomy, dermatology, space, math
+
+Rules:
+- general: everyday vocabulary, language learning, common objects
+- medical: anatomy, physiology, pathology, clinical terms
+- chemistry: chemical compounds, drugs, molecular structures
+- biology: cells, proteins, molecular biology, microbiology
+- taxonomy: species, genera, evolutionary biology (use Latin names in precise_term when known)
+- dermatology: skin lesions, rashes, melanoma, clinical dermatology
+- space: astronomy, planets, NASA-style topics
+- math: equations, physics formulas (put LaTeX in precise_term when applicable)
+"""
+
 
 def _format_examples(examples: str) -> str:
     """Format examples section for prompt (optional)"""
@@ -131,6 +195,31 @@ def _clean_keyword(raw: str) -> str:
     if len(words) > 4:
         keyword = ' '.join(words[:4])
     return keyword
+
+
+def _parse_search_context(raw: str, vocabulary: str) -> SearchContext:
+    """Parse AI JSON response into SearchContext with safe fallbacks."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            data = json.loads(text[start:end])
+            domain = data.get("domain", "general")
+            if domain not in VALID_IMAGE_DOMAINS:
+                domain = "general"
+            keyword = _clean_keyword(str(data.get("keyword", vocabulary)))
+            precise = str(data.get("precise_term", keyword)).strip() or keyword
+            if len(precise.split()) > 8:
+                precise = " ".join(precise.split()[:8])
+            return SearchContext(keyword=keyword, domain=domain, precise_term=precise)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+    kw = _clean_keyword(text) or vocabulary
+    return SearchContext(keyword=kw, domain="general", precise_term=kw)
 
 
 class GeminiProvider(AIProvider):
@@ -221,6 +310,43 @@ class GeminiProvider(AIProvider):
         # All keys failed
         raise AIProviderError(f"All Gemini keys failed: {last_error}")
 
+    def generate_search_context(
+        self, vocabulary: str, definition: str, examples: str = ""
+    ) -> SearchContext:
+        examples_section = _format_examples(examples)
+        prompt = SEARCH_CONTEXT_PROMPT.format(
+            vocabulary=vocabulary,
+            definition=definition,
+            examples_section=examples_section,
+        )
+        last_error = None
+        for api_key in self.api_keys:
+            try:
+                response = self.session.post(
+                    f"{self.base_url}/{self.model}:generateContent",
+                    params={"key": api_key},
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {
+                            "temperature": 0.3,
+                            "maxOutputTokens": 120,
+                        },
+                    },
+                    timeout=10,
+                )
+                if response.status_code != 200:
+                    last_error = response.text
+                    continue
+                result = response.json()
+                if "candidates" in result and result["candidates"]:
+                    text = result["candidates"][0]["content"]["parts"][0]["text"]
+                    return _parse_search_context(text, vocabulary)
+                last_error = "Empty response"
+            except Exception as e:
+                last_error = str(e)
+        raise AIProviderError(f"Gemini search context failed: {last_error}")
+
 
 class GroqProvider(AIProvider):
     """Groq API Provider - Miễn phí, siêu nhanh"""
@@ -298,6 +424,40 @@ class GroqProvider(AIProvider):
             raise AIProviderError("Groq: Connection failed")
         except Exception as e:
             raise AIProviderError(f"Groq error: {str(e)}")
+
+    def generate_search_context(
+        self, vocabulary: str, definition: str, examples: str = ""
+    ) -> SearchContext:
+        examples_section = _format_examples(examples)
+        prompt = SEARCH_CONTEXT_PROMPT.format(
+            vocabulary=vocabulary,
+            definition=definition,
+            examples_section=examples_section,
+        )
+        response = self.session.post(
+            f"{self.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Respond with ONE line of JSON only.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 120,
+            },
+            timeout=8,
+        )
+        if response.status_code != 200:
+            raise AIProviderError(f"Groq API error: {response.text}")
+        text = response.json()["choices"][0]["message"]["content"]
+        return _parse_search_context(text, vocabulary)
 
 
 class OllamaProvider(AIProvider):
@@ -460,7 +620,7 @@ class MultiAIProvider:
                 reverse=True
             )
     
-    def generate_keyword(self, vocabulary: str, definition: str) -> Tuple[str, str]:
+    def generate_keyword(self, vocabulary: str, definition: str, examples: str = "") -> Tuple[str, str]:
         """
         Generate search keyword với auto-fallback - v4.3 OPTIMIZED
         - Tries fastest provider first
@@ -504,6 +664,35 @@ class MultiAIProvider:
                 continue
         
         # Tất cả providers đều failed
+        error_summary = "\n".join(self.fallback_log)
+        raise AIProviderError(
+            f"Tất cả AI providers đều thất bại:\n{error_summary}"
+        )
+
+    def generate_search_context(
+        self, vocabulary: str, definition: str, examples: str = ""
+    ) -> Tuple[SearchContext, str]:
+        """Generate SearchContext with domain routing (v5.0)."""
+        self.fallback_log = []
+        with self.lock:
+            providers_to_try = list(self.providers)
+        for provider_name, provider in providers_to_try:
+            try:
+                start_time = time.time()
+                ctx = provider.generate_search_context(
+                    vocabulary, definition, examples
+                )
+                response_time = time.time() - start_time
+                self._update_provider_score(provider_name, True, response_time)
+                logger.info(
+                    f"[✓] {provider_name} context: domain={ctx.domain} "
+                    f"keyword='{ctx.keyword}' ({response_time:.2f}s)"
+                )
+                return ctx, provider_name
+            except AIProviderError as e:
+                self.fallback_log.append(f"{provider_name}: {e}")
+                self._update_provider_score(provider_name, False)
+                continue
         error_summary = "\n".join(self.fallback_log)
         raise AIProviderError(
             f"Tất cả AI providers đều thất bại:\n{error_summary}"
@@ -617,6 +806,12 @@ class GeminiImageEvaluator:
         for i, url in enumerate(candidate_urls, 1):
             prompt += f"{i}. {url} "
         prompt += f"\nReply with ONLY number (1-{len(candidate_urls)})."
+        
+        # 🚀 Fast skip: if ALL keys are blocked, return first candidate immediately
+        all_blocked = all(s["blocked"] for s in self.api_key_status.values())
+        if all_blocked:
+            logger.debug("[GEMINI EVAL] All keys blocked, skipping evaluation")
+            return candidate_urls[0]
         
         # 🔄 Thử từng API key cho đến khi thành công
         last_error = None

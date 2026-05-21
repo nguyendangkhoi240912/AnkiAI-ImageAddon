@@ -14,7 +14,14 @@ import time
 import threading
 import traceback
 
-# Configure logging
+# Configure logging - write to file for debugging
+_log_file = os.path.join(os.path.expanduser("~"), "Desktop", "AnkiAI-ImageAddon", "ankiai_debug.log")
+_file_handler = logging.FileHandler(_log_file, mode="w", encoding="utf-8")
+_file_handler.setLevel(logging.DEBUG)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.DEBUG)
+_root_logger.addHandler(_file_handler)
 logger = logging.getLogger(__name__)
 
 # Import modules
@@ -174,9 +181,13 @@ def on_browser_menu_add_images(browser: Browser):
                     config_manager.set("pexels_api_key", config.get("pexels_api_key", ""))
                     config_manager.set("google_api_key", config.get("google_api_key", ""))  # v4.0
                     config_manager.set("google_cx", config.get("google_cx", ""))  # v4.0
-                    config_manager.set("flickr_api_key", config.get("flickr_api_key", ""))  # ✨ NEW v4.2
-                    config_manager.set("europeana_api_key", config.get("europeana_api_key", ""))  # ✨ NEW v4.2
-                    config_manager.set("enable_rate_limit_protection", config.get("enable_rate_limit_protection", True))  # ✨ NEW v4.2
+                    config_manager.set("flickr_api_key", config.get("flickr_api_key", ""))
+                    config_manager.set("europeana_api_key", config.get("europeana_api_key", ""))
+                    config_manager.set("noun_project_api_key", config.get("noun_project_api_key", ""))
+                    config_manager.set("noun_project_api_secret", config.get("noun_project_api_secret", ""))
+                    config_manager.set("openverse_api_token", config.get("openverse_api_token", ""))
+                    config_manager.set("enable_ai_provider_routing", config.get("enable_ai_provider_routing", True))
+                    config_manager.set("enable_rate_limit_protection", config.get("enable_rate_limit_protection", True))
                 except ValueError as e:
                     browser_menu_manager.show_error("Lỗi cấu hình", str(e))
                     return
@@ -254,23 +265,22 @@ def on_browser_menu_add_images(browser: Browser):
         gemini_eval_api_key_6 = config_manager.get("gemini_eval_api_key_6", "")
         gemini_eval_api_key_7 = config_manager.get("gemini_eval_api_key_7", "")
         
-        # Image Providers (v4.6 - active providers only)
-        unsplash_key = config_manager.get("unsplash_api_key", "")
-        pexels_key = config_manager.get("pexels_api_key", "")
-        europeana_key = config_manager.get("europeana_api_key", "")  # ✨ NEW v4.2
-        
-        # ✨ Settings (v4.2 - rate limit protection)
-        enable_ai_evaluation = config_manager.get("enable_ai_evaluation", True)  # 🆕 v4.4: Re-enabled
+        # v5.0: full provider config for registry
+        provider_config = config_manager.get_all()
+        enable_ai_evaluation = config_manager.get("enable_ai_evaluation", True)
         enable_smart_selection = config_manager.get("enable_smart_selection", True)
-        enable_rate_limit_protection = config_manager.get("enable_rate_limit_protection", True)  # ✨ NEW v4.2
-        max_concurrent_providers = config_manager.get("max_concurrent_providers", 6)
-        
+        enable_ai_provider_routing = config_manager.get(
+            "enable_ai_provider_routing", True
+        )
+        max_concurrent_providers = config_manager.get("max_concurrent_providers", 10)
+        enable_adaptive_delay = config_manager.get("enable_adaptive_delay", True)
+        base_delay_ms = config_manager.get("base_delay_ms", 100)
+        max_delay_ms = config_manager.get("max_delay_ms", 2000)
+
         ai_provider = AIImageProvider(
-            # ✨ AI Providers (v4.2 - 4 Gemini keys with fallback chain)
             gemini_key=gemini_key,
             gemini_backup_key=gemini_backup_key,
-            gemini_keyword_backup=gemini_keyword_backup,  # ✨ NEW v4.2
-            # 🆕 v4.4: 7 Gemini Image Evaluator API keys
+            gemini_keyword_backup=gemini_keyword_backup,
             gemini_eval_api_key_1=gemini_eval_api_key_1,
             gemini_eval_api_key_2=gemini_eval_api_key_2,
             gemini_eval_api_key_3=gemini_eval_api_key_3,
@@ -281,15 +291,14 @@ def on_browser_menu_add_images(browser: Browser):
             groq_key=groq_key,
             use_ollama=use_ollama,
             ollama_url=ollama_url,
-            # Image Providers (v4.6 - active providers only)
-            unsplash_key=unsplash_key,
-            pexels_key=pexels_key,
-            europeana_key=europeana_key,
-            # ✨ Settings (v4.2)
+            provider_config=provider_config,
             enable_smart_selection=enable_smart_selection,
-            enable_ai_evaluation=enable_ai_evaluation,  # 🆕 v4.4: Re-enabled
-            enable_rate_limit_protection=enable_rate_limit_protection,  # ✨ NEW v4.2
-            max_concurrent_providers=max_concurrent_providers
+            enable_ai_evaluation=enable_ai_evaluation,
+            enable_ai_provider_routing=enable_ai_provider_routing,
+            max_concurrent_providers=max_concurrent_providers,
+            enable_adaptive_delay=enable_adaptive_delay,
+            base_delay_ms=base_delay_ms,
+            max_delay_ms=max_delay_ms,
         )
     except APIError as e:
         browser_menu_manager.show_error("Lỗi API", str(e))
@@ -357,11 +366,14 @@ Tiếp tục?"""
         
         # Count successful operations (results is list of tuples: (success, message))
         successful = [r for r in results if isinstance(r, tuple) and r[0]]
-        failed = [e for e in errors if e]
+        # Count failures: both exception errors AND notes that returned (False, message)
+        failed_results = [r for r in results if isinstance(r, tuple) and not r[0]]
+        failed_errors = [e for e in errors if e]
+        all_failures = [r[1] for r in failed_results] + failed_errors
         
         nonlocal successful_count, failed_count
         successful_count = len(successful)
-        failed_count = len(failed)
+        failed_count = len(all_failures)
         
         # Cập nhật progress dialog hoàn thành
         def _finish_ui():
@@ -373,22 +385,22 @@ Tiếp tục?"""
 Thành công: {successful_count}
 Thất bại: {failed_count}"""
             
-            if failed:
+            if all_failures:
                 summary += "\n\nLỗi (5 lỗi đầu):"
-                for error in failed[:5]:
-                    if isinstance(error, str):
-                        summary += f"\n- {error}"
-                    else:
-                        summary += f"\n- {error}"
+                for error in all_failures[:5]:
+                    summary += f"\n- {error}"
             
             progress_dialog.detail_label.setText(summary)
         
         mw.taskman.run_on_main(_finish_ui)
         
-        # Refresh browser (use timer instead of delay parameter)
+        # Refresh browser on main thread after a short delay
         def refresh_after_delay():
-            time.sleep(1)  # Wait 1 second for UI to settle
-            browser.search()
+            time.sleep(1)
+            try:
+                mw.taskman.run_on_main(browser.search)
+            except Exception as e:
+                logger.debug(f"Browser refresh failed (window may be closed): {e}")
         
         refresh_thread = threading.Thread(target=refresh_after_delay, daemon=True)
         refresh_thread.start()
@@ -455,10 +467,14 @@ def open_config_dialog():
             config_manager.set("google_api_key", config.get("google_api_key", ""))
             config_manager.set("google_cx", config.get("google_cx", ""))
             config_manager.set("flickr_api_key", config.get("flickr_api_key", ""))  # ✨ NEW v4.2
-            config_manager.set("europeana_api_key", config.get("europeana_api_key", ""))  # ✨ NEW v4.2
+            config_manager.set("europeana_api_key", config.get("europeana_api_key", ""))
+            config_manager.set("noun_project_api_key", config.get("noun_project_api_key", ""))
+            config_manager.set("noun_project_api_secret", config.get("noun_project_api_secret", ""))
+            config_manager.set("openverse_api_token", config.get("openverse_api_token", ""))
+            config_manager.set("enable_ai_provider_routing", config.get("enable_ai_provider_routing", True))
             config_manager.set("enable_smart_selection", config.get("enable_smart_selection", True))
-            config_manager.set("enable_rate_limit_protection", config.get("enable_rate_limit_protection", True))  # ✨ NEW v4.2
-            config_manager.set("max_concurrent_providers", config.get("max_concurrent_providers", 6))
+            config_manager.set("enable_rate_limit_protection", config.get("enable_rate_limit_protection", True))
+            config_manager.set("max_concurrent_providers", config.get("max_concurrent_providers", 10))
             config_manager.set("image_generation_mode", config.get("image_generation_mode", "search"))
             
             # Force save config
@@ -480,7 +496,7 @@ def on_config_changed(new_config):
 
 def setup_addon():
     """Setup add-on khi Anki khởi động"""
-    global browser_menu_manager, image_handler, bg_processor, config_manager
+    global browser_menu_manager, image_handler, bg_processor, config_manager, feature_db, advanced_features
     
     logger.info("[ADDON] Initializing AnkiAI...")
     
@@ -492,9 +508,12 @@ def setup_addon():
         bg_processor = BackgroundProcessor()
         
         # 🆕 v4.5: Initialize feature database and advanced features
-        feature_db = FeatureDatabase(os.path.dirname(mw.col.path))
-        advanced_features = AdvancedFeatures(feature_db)
-        logger.info("[ADDON] Advanced features database initialized")
+        if mw.col:
+            feature_db = FeatureDatabase(os.path.dirname(mw.col.path))
+            advanced_features = AdvancedFeatures(feature_db)
+            logger.info("[ADDON] Advanced features database initialized")
+        else:
+            logger.warning("[ADDON] Collection not ready, skipping feature database init")
         
         # Hook vào Browser
         from aqt import gui_hooks

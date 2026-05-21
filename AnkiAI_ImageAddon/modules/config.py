@@ -38,9 +38,13 @@ class ConfigManager:
         "wallhaven_api_key": "",
         "google_api_key": "",
         "google_cx": "",
-        "flickr_api_key": "",  # ✨ NEW v4.2: Flickr API key
-        "europeana_api_key": "",  # ✨ NEW v4.2: Europeana API key
-        # No API keys needed for: Openverse, Lorem Picsum, NASA, LOC, Wikimedia, Smithsonian, Met, FlagsAPI
+        "flickr_api_key": "",
+        "europeana_api_key": "",
+        "noun_project_api_key": "",
+        "noun_project_api_secret": "",
+        "openverse_api_token": "",
+        "enable_ai_provider_routing": True,
+        # Free without keys: Openverse, DuckDuckGo, Wikimedia, NASA, PubChem, etc.
         
         # 🆕 v4.4: Gemini Image Evaluator - 7 API keys with auto-failover
         "gemini_eval_api_key_1": "",
@@ -198,9 +202,12 @@ class ConfigManager:
         
         # Image search providers
         has_image_provider = (
-            bool(self.get("pexels_api_key")) or
-            bool(self.get("unsplash_api_key")) or
-            bool(self.get("pixabay_api_key"))
+            bool(self.get("pexels_api_key"))
+            or bool(self.get("unsplash_api_key"))
+            or bool(self.get("pixabay_api_key"))
+            or bool(self.get("flickr_api_key"))
+            or bool(self.get("google_api_key"))
+            or True  # free providers always available
         )
         
         return {

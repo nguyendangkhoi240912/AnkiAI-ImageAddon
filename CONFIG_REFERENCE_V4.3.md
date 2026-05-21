@@ -63,8 +63,19 @@
 | `google_api_key` | string | `""` | API Key Google Custom Search |
 | `google_cx` | string | `""` | Google Custom Search Engine ID (cx) |
 
+#### v5.0 Additional Keys
+
+| Setting | Kiểu | Mặc Định | Ý Nghĩa |
+|---------|------|---------|--------|
+| `noun_project_api_key` | string | `""` | The Noun Project OAuth consumer key |
+| `noun_project_api_secret` | string | `""` | The Noun Project OAuth secret |
+| `openverse_api_token` | string | `""` | Openverse bearer token (optional) |
+| `enable_ai_provider_routing` | boolean | `true` | AI routes to general vs scientific APIs |
+
+See [IMAGE_SOURCES_V5.md](IMAGE_SOURCES_V5.md) for all 20 sources and domain mapping.
+
 #### Free Providers (Không Cần Key)
-- Openverse, Lorem Picsum, NASA, LOC (Library of Congress), Wikimedia, Smithsonian, Met Museum, FlagsAPI
+- Openverse, DuckDuckGo, Yandex, Wikimedia, NASA, PubChem, PhyloPic, LOC, Met Museum, Lorem Picsum, and more
 
 ---
 
