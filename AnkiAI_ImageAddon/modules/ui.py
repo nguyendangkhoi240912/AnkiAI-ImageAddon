@@ -265,26 +265,69 @@ class ConfigDialog(QDialog):
         self.ollama_url_input.setPlaceholderText("URL của Ollama server")
         scroll_widget.addWidget(self.ollama_url_input)
         
-        # ✨ Image Search Providers (15+ sources - v4.2)
-        scroll_widget.addWidget(QLabel("\n📷 Image Search Providers (15+ sources - cấu hình ít nhất một):"))
+        # v5.0: 20+ image sources
+        scroll_widget.addWidget(QLabel("\n📷 Image Search Providers (20+ nguồn — miễn phí luôn khả dụng):"))
         
-        scroll_widget.addWidget(QLabel("Pexels API Key (⭐ Nên cấu hình - nhanh, chất lượng cao):"))
+        self.enable_ai_routing_checkbox = QCheckBox(
+            "Bật AI routing nguồn chuyên ngành (y khoa, hóa học, sinh học...)"
+        )
+        self.enable_ai_routing_checkbox.setChecked(True)
+        self.enable_ai_routing_checkbox.setToolTip(
+            "AI phân loại chủ đề thẻ và chỉ gọi API phù hợp (PubChem, PhyloPic, ISIC...)"
+        )
+        scroll_widget.addWidget(self.enable_ai_routing_checkbox)
+        
+        scroll_widget.addWidget(QLabel("Pexels API Key (tuỳ chọn — nhanh, chất lượng cao):"))
         self.pexels_input = QLineEdit()
         self.pexels_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.pexels_input.setPlaceholderText("Get from: pexels.com/api")
+        self.pexels_input.setPlaceholderText("pexels.com/api")
         scroll_widget.addWidget(self.pexels_input)
         
         scroll_widget.addWidget(QLabel("Unsplash API Key (tuỳ chọn):"))
         self.unsplash_input = QLineEdit()
         self.unsplash_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.unsplash_input.setPlaceholderText("Get from: unsplash.com/developers")
+        self.unsplash_input.setPlaceholderText("unsplash.com/developers")
         scroll_widget.addWidget(self.unsplash_input)
         
-        scroll_widget.addWidget(QLabel("Europeana API Key (tuỳ chọn - v4.2):"))
+        scroll_widget.addWidget(QLabel("Pixabay API Key (tuỳ chọn):"))
+        self.pixabay_input = QLineEdit()
+        self.pixabay_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.pixabay_input.setPlaceholderText("pixabay.com/api/docs")
+        scroll_widget.addWidget(self.pixabay_input)
+        
+        scroll_widget.addWidget(QLabel("Flickr API Key (tuỳ chọn — CC license):"))
+        self.flickr_input = QLineEdit()
+        self.flickr_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.flickr_input.setPlaceholderText("flickr.com/services/api")
+        scroll_widget.addWidget(self.flickr_input)
+        
+        scroll_widget.addWidget(QLabel("Google Custom Search API Key + CX (tuỳ chọn):"))
+        self.google_key_input = QLineEdit()
+        self.google_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.google_key_input.setPlaceholderText("Google API key")
+        scroll_widget.addWidget(self.google_key_input)
+        self.google_cx_input = QLineEdit()
+        self.google_cx_input.setPlaceholderText("Custom Search Engine ID (cx)")
+        scroll_widget.addWidget(self.google_cx_input)
+        
+        scroll_widget.addWidget(QLabel("Noun Project API Key + Secret (tuỳ chọn — icons):"))
+        self.noun_key_input = QLineEdit()
+        self.noun_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        scroll_widget.addWidget(self.noun_key_input)
+        self.noun_secret_input = QLineEdit()
+        self.noun_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
+        scroll_widget.addWidget(self.noun_secret_input)
+        
+        scroll_widget.addWidget(QLabel("Europeana API Key (tuỳ chọn):"))
         self.europeana_input = QLineEdit()
         self.europeana_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.europeana_input.setPlaceholderText("Get from: pro.europeana.eu/page/apis")
+        self.europeana_input.setPlaceholderText("pro.europeana.eu/page/apis")
         scroll_widget.addWidget(self.europeana_input)
+        
+        scroll_widget.addWidget(QLabel("Openverse API Token (tuỳ chọn — tăng rate limit):"))
+        self.openverse_token_input = QLineEdit()
+        self.openverse_token_input.setEchoMode(QLineEdit.EchoMode.Password)
+        scroll_widget.addWidget(self.openverse_token_input)
         
         # 🆕 v4.4: Gemini Image Evaluator - 7 API keys with auto-failover
         scroll_widget.addWidget(QLabel("\n🎯 Gemini Image Evaluator (7 API Keys - Auto Failover v4.4):"))
@@ -385,10 +428,6 @@ class ConfigDialog(QDialog):
                 if gemini_keyword_backup_key:
                     self.gemini_keyword_backup_input.setText(gemini_keyword_backup_key)
                 
-                gemini_keyword_backup_key = self.existing_config.get("gemini_keyword_api_key_backup", "")
-                if gemini_keyword_backup_key:
-                    self.gemini_keyword_backup_input.setText(gemini_keyword_backup_key)
-                
                 use_ollama = self.existing_config.get("use_ollama", False)
                 self.ollama_checkbox.setChecked(use_ollama)
                 
@@ -404,10 +443,33 @@ class ConfigDialog(QDialog):
                 if pexels_key:
                     self.pexels_input.setText(pexels_key)
                 
-                # ✨ Load new provider keys (v4.2)
+                pixabay_key = self.existing_config.get("pixabay_api_key", "")
+                if pixabay_key:
+                    self.pixabay_input.setText(pixabay_key)
+                flickr_key = self.existing_config.get("flickr_api_key", "")
+                if flickr_key:
+                    self.flickr_input.setText(flickr_key)
+                google_key = self.existing_config.get("google_api_key", "")
+                if google_key:
+                    self.google_key_input.setText(google_key)
+                google_cx = self.existing_config.get("google_cx", "")
+                if google_cx:
+                    self.google_cx_input.setText(google_cx)
+                noun_key = self.existing_config.get("noun_project_api_key", "")
+                if noun_key:
+                    self.noun_key_input.setText(noun_key)
+                noun_secret = self.existing_config.get("noun_project_api_secret", "")
+                if noun_secret:
+                    self.noun_secret_input.setText(noun_secret)
                 europeana_key = self.existing_config.get("europeana_api_key", "")
                 if europeana_key:
                     self.europeana_input.setText(europeana_key)
+                openverse_token = self.existing_config.get("openverse_api_token", "")
+                if openverse_token:
+                    self.openverse_token_input.setText(openverse_token)
+                self.enable_ai_routing_checkbox.setChecked(
+                    self.existing_config.get("enable_ai_provider_routing", True)
+                )
                 
                 # 🆕 v4.4: Load 7 Gemini Eval API keys
                 enable_ai_eval = self.existing_config.get("enable_ai_evaluation", True)
@@ -444,8 +506,7 @@ class ConfigDialog(QDialog):
         unsplash_key = self.unsplash_input.text().strip()
         europeana_key = self.europeana_input.text().strip()  # ✨ NEW v4.2
         
-        if not (pexels_key or unsplash_key or europeana_key):
-            raise ValueError("Vui lòng cấu hình ít nhất một Image Provider (Pexels, Unsplash, hoặc Europeana)")
+        # Free providers (Wikimedia, DuckDuckGo, NASA, PubChem...) always work without keys
         
         # 🆕 v4.4: Get 7 Gemini Eval API keys
         enable_ai_eval = self.enable_ai_eval_checkbox.isChecked()
@@ -479,10 +540,19 @@ class ConfigDialog(QDialog):
             "ollama_url": self.ollama_url_input.text().strip(),
             "unsplash_api_key": unsplash_key,
             "pexels_api_key": pexels_key,
-            "europeana_api_key": europeana_key,  # ✨ NEW v4.2
-            "enable_rate_limit_protection": enable_rate_limit,  # ✨ NEW v4.2
-            "rate_limit_pause_duration": rate_limit_pause,  # ✨ NEW v4.2
-            "image_generation_mode": "search"
+            "pixabay_api_key": self.pixabay_input.text().strip(),
+            "flickr_api_key": self.flickr_input.text().strip(),
+            "google_api_key": self.google_key_input.text().strip(),
+            "google_cx": self.google_cx_input.text().strip(),
+            "noun_project_api_key": self.noun_key_input.text().strip(),
+            "noun_project_api_secret": self.noun_secret_input.text().strip(),
+            "europeana_api_key": europeana_key,
+            "openverse_api_token": self.openverse_token_input.text().strip(),
+            "enable_ai_provider_routing": self.enable_ai_routing_checkbox.isChecked(),
+            "enable_rate_limit_protection": enable_rate_limit,
+            "rate_limit_pause_duration": rate_limit_pause,
+            "max_concurrent_providers": 10,
+            "image_generation_mode": "search",
         }
     
     def test_connection(self):
@@ -526,7 +596,7 @@ class ConfigDialog(QDialog):
         if gemini_key:
             try:
                 response = requests.post(
-                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
                     params={"key": gemini_key},
                     headers={"Content-Type": "application/json"},
                     json={
@@ -637,9 +707,37 @@ class ConfigDialog(QDialog):
         except Exception as e:
             results.append(("Library of Congress", str(e), False, "Connection error"))
         
-        # Skip Wikimedia Commons test (persistently blocked with 403)
-        # The provider still works for actual image search, just blocked in test
-        results.append(("Wikimedia Commons", "Skipped", None, "Test blocked by server"))
+        # NASA (free)
+        try:
+            response = requests.get(
+                "https://images-api.nasa.gov/search",
+                params={"q": "mars", "media_type": "image"},
+                timeout=6,
+            )
+            if response.status_code == 200:
+                results.append(("NASA", "OK", True, "Space imagery"))
+            else:
+                results.append(("NASA", f"Error {response.status_code}", False, ""))
+        except Exception as e:
+            results.append(("NASA", str(e), False, ""))
+
+        # PubChem (free)
+        try:
+            response = requests.get(
+                "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/aspirin/cids/JSON",
+                timeout=6,
+            )
+            if response.status_code == 200:
+                results.append(("PubChem", "OK", True, "Molecular structures"))
+            else:
+                results.append(("PubChem", f"Error {response.status_code}", False, ""))
+        except Exception as e:
+            results.append(("PubChem", str(e), False, ""))
+
+        # DuckDuckGo (free)
+        results.append(("DuckDuckGo", "Registered", True, "No API key"))
+
+        results.append(("Wikimedia Commons", "Registered", True, "Direct image URLs via imageinfo"))
         
         # Test Met Museum (no API key needed)
         try:
@@ -879,7 +977,7 @@ def get_note_data(note) -> tuple:
             fields.get("Mặt trước") or
             fields.get("Word") or
             fields.get("Question") or
-            list(fields.values())[0] if fields else ""
+            (list(fields.values())[0] if fields else "")
         )
         
         definition = (
@@ -888,7 +986,7 @@ def get_note_data(note) -> tuple:
             fields.get("Definition") or
             fields.get("Định nghĩa") or
             fields.get("Answer") or
-            list(fields.values())[1] if len(fields) > 1 else ""
+            (list(fields.values())[1] if len(fields) > 1 else "")
         )
         
         # Loại bỏ HTML tags

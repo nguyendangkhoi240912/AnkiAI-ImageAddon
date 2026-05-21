@@ -6,6 +6,8 @@ Giai đoạn 4: Chạy xỚ lý ngầm với thanh tiến trình
 from aqt.operations import QueryOp
 from aqt import mw
 from typing import List, Callable, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 import time
 import logging
 
@@ -50,47 +52,78 @@ class BackgroundProcessor:
         errors = []
         
         def background_work(col):
-            """Công việc chính ở background"""
+            """Công việc chính ở background - CONCURRENT processing"""
             try:
                 total = len(note_ids)
-                logger.info(f"🚀 Starting background work: Processing {total} notes")
+                logger.info(f"🚀 Starting background work: Processing {total} notes (concurrent)")
                 
-                for index, note_id in enumerate(note_ids):
+                db_lock = threading.Lock()
+                completed = [0]  # Use list for mutability in closure
+                
+                def process_single_note(index, note_id):
+                    """Process a single note - runs in thread pool"""
                     if self.cancelled:
-                        break
+                        return (False, "Đã hủy")
                     
                     try:
-                        # Lấy note từ database
                         note = col.get_note(note_id)
                         logger.debug(f"📌 [{index + 1}/{total}] Retrieved note {note_id}: {note.keys()}")
                         
-                        # Xử lý note
+                        # Process note (AI + image search + download - all network I/O)
                         result = process_func(note)
-                        results.append(result)
                         success, message = result
                         
                         logger.info(f"📌 [{index + 1}/{total}] Process result: success={success}, msg={message}")
                         
-                        # 🔧 FIX: Explicitly save note to database after processing
+                        # Serialize database writes
                         if success:
-                            logger.debug(f"📌 [{index + 1}/{total}] Calling col.update_note() for note {note_id}")
-                            logger.debug(f"📌 [{index + 1}/{total}] Note fields before update: {dict(note)}")
-                            col.update_note(note)
-                            logger.info(f"✅ [{index + 1}/{total}] Note {note_id} updated successfully")
+                            with db_lock:
+                                col.update_note(note)
+                            logger.info(f"✅ [{index + 1}/{total}] Note {note_id} updated")
                         else:
-                            logger.warning(f"⚠️  [{index + 1}/{total}] Failed to process note {note_id}: {message}")
+                            logger.warning(f"⚠️  [{index + 1}/{total}] Failed: {message}")
                         
-                        # Cập nhật tiến trình
+                        # Update progress
+                        with db_lock:
+                            completed[0] += 1
+                            current = completed[0]
+                        
                         if on_progress:
-                            progress_msg = f"Đang xử lý thẻ {index + 1}/{total}"
-                            on_progress(index + 1, total, progress_msg)
+                            progress_msg = f"Đang xử lý thẻ {current}/{total}"
+                            on_progress(current, total, progress_msg)
+                        
+                        return result
                     
                     except Exception as e:
                         error_msg = f"❌ Lỗi xử lý note {note_id}: {str(e)}"
-                        errors.append(error_msg)
                         logger.error(error_msg, exc_info=True)
+                        
+                        with db_lock:
+                            completed[0] += 1
+                            current = completed[0]
+                        if on_progress:
+                            on_progress(current, total, f"Lỗi thẻ {current}/{total}")
+                        
+                        return (False, error_msg)
                 
-                # 🔧 Commit all changes to database
+                # 🚀 Process cards concurrently (3 workers)
+                max_workers = min(3, total)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {}
+                    for index, note_id in enumerate(note_ids):
+                        future = executor.submit(process_single_note, index, note_id)
+                        futures[future] = index
+                    
+                    for future in as_completed(futures):
+                        try:
+                            result = future.result()
+                            results.append(result)
+                        except Exception as e:
+                            error_msg = f"❌ Thread error: {str(e)}"
+                            errors.append(error_msg)
+                            logger.error(error_msg)
+                
+                # Save all changes at once
                 logger.info(f"💾 Saving database... (processed {total} notes)")
                 col.save()
                 logger.info(f"✅ Database saved successfully!")

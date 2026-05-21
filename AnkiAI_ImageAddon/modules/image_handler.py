@@ -12,6 +12,7 @@ v4.3 🚀 Optimizations:
 - Stream mode for memory efficiency
 """
 
+import logging
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -29,6 +30,7 @@ try:
 except ImportError:
     HAS_PIL = False
 
+logger = logging.getLogger(__name__)
 
 class ImageError(Exception):
     """Exception cho image operations"""
@@ -92,17 +94,30 @@ class ImageHandler:
         """
         Kiểm tra URL có phải định dạng hỗ trợ không
         v4.4: Only JPG, PNG, GIF, JPEG, SVG, WebP formats allowed
-        🚀 Uses tuple for O(1) lookup
+        v5.0: Recognize API image endpoints (PubChem /PNG, ChEMBL ?format=svg, etc.)
         """
-        # 🚀 Optimize: Single-pass URL cleaning
-        clean_url = url.lower()
-        if "?" in clean_url:
-            clean_url = clean_url.split("?")[0]
-        if "#" in clean_url:
-            clean_url = clean_url.split("#")[0]
-        
-        # 🚀 O(1) tuple lookup instead of O(n) loop
-        return clean_url.endswith(tuple(self.SUPPORTED_FORMATS))
+        url_lower = url.lower()
+        clean_url = url_lower.split("?")[0].split("#")[0]
+
+        if clean_url.endswith(tuple(self.SUPPORTED_FORMATS)):
+            return True
+
+        # Known scientific / API image endpoints without file extensions
+        if "pubchem.ncbi.nlm.nih.gov" in url_lower and "/png" in url_lower:
+            return True
+        if "chembl/api/data/molecule" in url_lower and "/image" in clean_url:
+            return True
+        if "latex.codecogs.com" in url_lower:
+            return True
+        if "api.phylopic.org" in url_lower:
+            return True
+        if "cdn.rcsb.org/images" in url_lower:
+            return True
+        if "format=svg" in url_lower or "format=png" in url_lower:
+            return True
+        if any(seg in clean_url for seg in ("/png", "/jpeg", "/gif", "/svg")):
+            return True
+        return False
     
     def _validate_content_type(self, content_type: str) -> bool:
         """
@@ -128,19 +143,22 @@ class ImageHandler:
         """
         if not url:
             raise ImageError("URL không hợp lệ")
-        
-        # ✨ v4.4: Check if URL has supported format
-        if not self._is_supported_format(url):
-            raise ImageError(f"Định dạng ảnh không hỗ trợ (chỉ JPG/PNG/GIF/JPEG/SVG/WebP): {url}")
-        
+
+        # #region agent log
+        try:
+            from .debug_log import dbg
+            dbg(
+                "image_handler.py:download_image",
+                "download_start",
+                {"url_prefix": url[:80], "format_ok": self._is_supported_format(url)},
+                "A",
+            )
+        except Exception:
+            pass
+        # #endregion
+
         if timeout is None:
             timeout = self.DOWNLOAD_TIMEOUT
-        
-        # 🚀 Optimize: Efficient URL cleaning - avoid chained splits
-        if "?" in url:
-            url = url.split("?")[0]
-        if "#" in url:
-            url = url.split("#")[0]
         
         for attempt in range(self.MAX_RETRIES):
             try:
@@ -168,9 +186,10 @@ class ImageHandler:
                 if content_type:
                     if not self._validate_content_type(content_type):
                         raise ImageError(f"MIME type không hỗ trợ: {content_type}")
-                elif not any(fmt in url.lower() for fmt in self.SUPPORTED_FORMATS):
-                    # No content-type and URL doesn't have supported format
-                    raise ImageError(f"Không thể xác định định dạng ảnh: không có Content-Type header")
+                elif not self._is_supported_format(url):
+                    raise ImageError(
+                        "Không thể xác định định dạng ảnh: không có Content-Type header"
+                    )
                 
                 # Optimize if PIL available
                 if optimize and HAS_PIL:
@@ -179,8 +198,20 @@ class ImageHandler:
                     except Exception as e:
                         logger.warning(f"Image optimization failed: {e}, using original")
                 
+                # #region agent log
+                try:
+                    from .debug_log import dbg
+                    dbg(
+                        "image_handler.py:download_image",
+                        "download_ok",
+                        {"bytes": len(image_data), "content_type": content_type[:40]},
+                        "A",
+                    )
+                except Exception:
+                    pass
+                # #endregion
                 return image_data
-            
+
             except requests.exceptions.Timeout:
                 if attempt == self.MAX_RETRIES - 1:
                     raise ImageError(f"Download timeout sau {self.MAX_RETRIES} lần thử")
@@ -193,6 +224,18 @@ class ImageHandler:
             
             except Exception as e:
                 if attempt == self.MAX_RETRIES - 1:
+                    # #region agent log
+                    try:
+                        from .debug_log import dbg
+                        dbg(
+                            "image_handler.py:download_image",
+                            "download_fail",
+                            {"error": str(e)[:120], "url_prefix": url[:80]},
+                            "A",
+                        )
+                    except Exception:
+                        pass
+                    # #endregion
                     raise ImageError(f"Download error: {str(e)}")
         
         raise ImageError("Download thất bại")
