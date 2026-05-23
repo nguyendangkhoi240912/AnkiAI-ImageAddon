@@ -144,6 +144,7 @@ class AIImageProvider:
                 raise APIError(str(e))
 
         self._result_url_cache: Dict[str, Tuple[str, float]] = {}
+        self._last_candidate_urls: List[str] = []
 
     def get_image_url(
         self, vocabulary: str, definition: str, examples: str = ""
@@ -232,6 +233,8 @@ class AIImageProvider:
             if not candidate_urls:
                 raise APIError(f"No images found for: '{ctx.keyword}'")
 
+            self._last_candidate_urls = list(candidate_urls)
+
             # #region agent log
             dbg(
                 "api_handler.py:get_image_url",
@@ -244,6 +247,7 @@ class AIImageProvider:
                     else "",
                 },
                 "B",
+                run_id="post-fix",
             )
             # #endregion
 
@@ -265,6 +269,10 @@ class AIImageProvider:
 
         except ImageProviderError as e:
             raise APIError(f"Image search failed: {e}")
+
+    def get_fallback_image_urls(self) -> List[str]:
+        """Remaining candidate URLs after the primary choice (for download retry)."""
+        return list(self._last_candidate_urls[1:8])
 
     def _get_result_cache(self, key: str) -> Optional[str]:
         entry = self._result_url_cache.get(key)

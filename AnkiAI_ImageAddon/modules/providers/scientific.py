@@ -221,45 +221,15 @@ class ISICProvider:
 
 
 class EuropePMCProvider:
-    """Europe PMC - figures from open-access articles."""
+    """Europe PMC - disabled until figure URLs are validated (thumbnail API 404s)."""
 
     def __init__(self):
         self.name = "europe_pmc"
         self.session = _ImageProviderSessionManager.get_session("europe_pmc")
 
     def search(self, keyword: str, per_page: int = 2) -> List[Dict]:
-        try:
-            response = self.session.get(
-                "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
-                params={
-                    "query": f"{keyword} HAS_FT:Y",
-                    "format": "json",
-                    "pageSize": per_page,
-                    "resultType": "core",
-                },
-                timeout=8,
-            )
-            if response.status_code != 200:
-                raise ImageProviderError(f"Europe PMC {response.status_code}")
-            articles = response.json().get("resultList", {}).get("result", [])
-            if not articles:
-                raise ImageProviderError("No results")
-            images = []
-            for article in articles[:per_page]:
-                pmcid = article.get("pmcid")
-                if not pmcid:
-                    continue
-                fig_url = (
-                    f"https://www.ebi.ac.uk/europepmc/webservices/rest/"
-                    f"{pmcid}/thumbnail/1"
-                )
-                title = article.get("title", keyword)
-                images.append(result_dict(fig_url, title[:80], self.name))
-            if not images:
-                raise ImageProviderError("No Europe PMC figures")
-            return images
-        except Exception as e:
-            raise ImageProviderError(str(e))
+        # Runtime evidence: /thumbnail/1 URLs return HTTP 404 for PMC IDs.
+        raise ImageProviderError("Europe PMC figure URLs unavailable")
 
 
 class NASAImagesProvider:

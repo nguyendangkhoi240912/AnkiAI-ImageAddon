@@ -6,7 +6,8 @@ import logging
 import multiprocessing
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set, Tuple
@@ -121,7 +122,7 @@ class ImageScore:
         "phylopic": 80,
         "nasa": 78,
         "isic": 85,
-        "europe_pmc": 75,
+        "europe_pmc": 40,
         "bioicons": 82,
         "codecogs": 90,
         "yandex": 65,
@@ -149,8 +150,37 @@ class ImageScore:
             bonus = min(len(self.title) / 5, 10)
             self.score += bonus
             self.details["title_relevance"] = bonus
+        if self.url and not _url_is_likely_downloadable(self.url):
+            self.score -= 35
+            self.details["downloadable_penalty"] = -35
         self.score = max(0, min(100, self.score))
         return self.score
+
+
+def _url_is_likely_downloadable(url: str) -> bool:
+    """Heuristic filter for URLs that fail at download time (runtime-proven)."""
+    if not url:
+        return False
+    u = url.lower()
+    if "europepmc" in u and "/thumbnail/" in u:
+        return False
+    if u.endswith((".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp")):
+        return True
+    if "pubchem.ncbi.nlm.nih.gov" in u and "/png" in u:
+        return True
+    if "chembl/api/data/molecule" in u and "/image" in u:
+        return True
+    if "latex.codecogs.com" in u:
+        return True
+    if "cdn.rcsb.org/images" in u:
+        return True
+    if "images.pexels.com" in u or "images.unsplash.com" in u:
+        return True
+    if "upload.wikimedia.org" in u or "commons.wikimedia.org/wiki/Special:FilePath" in u:
+        return True
+    if "format=svg" in u or "format=png" in u:
+        return True
+    return False
 
 
 class ImageCache:
@@ -216,7 +246,7 @@ class ProviderStats:
 
 
 class SmartImageSelector:
-    MAX_PROVIDERS_PER_SEARCH = 12
+    MAX_PROVIDERS_PER_SEARCH = 8
 
     def __init__(
         self,
@@ -394,27 +424,86 @@ class SmartImageSelector:
 
         all_scored: List[ImageScore] = []
         workers = min(self.max_workers, len(sorted_providers))
+        deadline = time.time() + 25
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {
+            future_map = {
                 executor.submit(
                     self._search_provider, p, keyword, precise_term
                 ): p[0]
                 for p in sorted_providers
             }
-            for future in as_completed(futures, timeout=18):
+            pending = set(future_map.keys())
+            while pending and time.time() < deadline:
+                remaining = max(0.1, deadline - time.time())
+                done, pending = concurrent.futures.wait(
+                    pending,
+                    timeout=remaining,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for future in done:
+                    pname = future_map.get(future, "?")
+                    try:
+                        all_scored.extend(future.result())
+                    except FuturesTimeoutError:
+                        if pname in self.provider_stats:
+                            self.provider_stats[pname].record_failure()
+                    except Exception as e:
+                        logger.debug(f"search_smart future error ({pname}): {e}")
+
+            if pending:
+                # #region agent log
                 try:
-                    all_scored.extend(future.result(timeout=8))
-                except FuturesTimeoutError:
-                    self.provider_stats[futures[future]].record_failure()
-                except Exception as e:
-                    logger.debug(f"search_smart future error: {e}")
+                    from .debug_log import dbg
+                    dbg(
+                        "image_providers.py:search_smart",
+                        "global_timeout_partial",
+                        {
+                            "partial_count": len(all_scored),
+                            "pending": len(pending),
+                            "providers": len(sorted_providers),
+                        },
+                        "G",
+                        run_id="post-fix",
+                    )
+                except Exception:
+                    pass
+                # #endregion
+                logger.warning(
+                    "search_smart: deadline reached, %s pending providers skipped, %s results",
+                    len(pending),
+                    len(all_scored),
+                )
+                for future in pending:
+                    future.cancel()
 
         if not all_scored:
             raise ImageProviderError(f"No images found for: '{keyword}'")
 
         all_scored.sort(key=lambda x: x.score, reverse=True)
-        top_urls = [img.url for img in all_scored[:top_n]]
+        top_urls = []
+        for img in all_scored:
+            if _url_is_likely_downloadable(img.url):
+                top_urls.append(img.url)
+            if len(top_urls) >= top_n:
+                break
+        if not top_urls:
+            top_urls = [img.url for img in all_scored[:top_n] if img.url]
+
+        # #region agent log
+        try:
+            from .debug_log import dbg
+            dbg(
+                "image_providers.py:search_smart",
+                "urls_picked",
+                {"top_urls": [u[:80] for u in top_urls[:3]]},
+                "F",
+                run_id="post-fix",
+            )
+        except Exception:
+            pass
+        # #endregion
+
         self.cache.set(cache_key, top_urls)
         return top_urls
 
