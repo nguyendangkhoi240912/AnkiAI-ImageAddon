@@ -1,5 +1,25 @@
 # 📋 Changelog - AnkiAI v2.0
 
+## Version 2.1 - Animated GIF Sources
+
+### 🆕 New Features
+
+#### Animated GIF & Icon Sources
+- ✅ **KLIPY API** - Free GIF API with localization support
+- ✅ **GIPHY API** - Large library of reaction GIFs
+- ✅ **Tenor API** - Google's GIF platform (deprecated after 2026-06-30)
+- ✅ **Pixabay Animated** - GIF support via existing Pixabay key
+- ✅ **IconScout** - Animated icons and Lottie files
+
+**Config keys added:**
+```
+klipy_app_key, giphy_api_key, tenor_api_key, iconscout_api_token
+```
+
+**New domain:** `animated` - Use `get_animated_image_url()` or set `domain: "animated"` in AI context.
+
+**Tenor deprecation handling:** Automatically disabled after 2026-06-30 with warning log.
+
 ## Version 2.0 - Performance & Feature Upgrade
 
 ### 🆕 New Features

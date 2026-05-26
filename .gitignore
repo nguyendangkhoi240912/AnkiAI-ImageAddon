@@ -31,6 +31,7 @@ build/
 # Temp files
 *.tmp
 *.log
+AnkiAI_ImageAddon/logs/
 *.backup
 .env
 

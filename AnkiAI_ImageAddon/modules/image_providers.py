@@ -40,6 +40,11 @@ from .providers import (  # noqa: F401
     NASAImagesProvider,
     CodeCogsProvider,
     BioiconsProvider,
+    KLIPYProvider,
+    GIPHYProvider,
+    TenorProvider,
+    PixabayAnimatedProvider,
+    IconScoutProvider,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,6 +134,11 @@ class ImageScore:
         "metmuseum": 62,
         "lorem_picsum": 50,
         "europeana": 68,
+        "klipy": 86,
+        "giphy": 80,
+        "tenor": 79,
+        "pixabay_animated": 77,
+        "iconscout": 76,
     }
 
     def __init__(self, url: str, provider: str, title: str = ""):
@@ -268,6 +278,8 @@ class SmartImageSelector:
             "pixabay",
             "duckduckgo",
             "codecogs",
+            "giphy",
+            "tenor",
         }
         medium = {
             "openverse",
@@ -278,6 +290,9 @@ class SmartImageSelector:
             "nasa",
             "pubchem",
             "phylopic",
+            "klipy",
+            "pixabay_animated",
+            "iconscout",
         }
         if provider_name in fast:
             return 2.0
@@ -374,23 +389,6 @@ class SmartImageSelector:
 
         if not sorted_providers:
             raise ImageProviderError("No image providers available")
-
-        # #region agent log
-        try:
-            from .debug_log import dbg
-            dbg(
-                "image_providers.py:search_smart",
-                "providers_selected",
-                {
-                    "keyword": keyword[:40],
-                    "domains": sorted(domains) if domains else None,
-                    "provider_names": [p[0] for p in sorted_providers],
-                },
-                "C",
-            )
-        except Exception:
-            pass
-        # #endregion
 
         all_scored: List[ImageScore] = []
         workers = min(self.max_workers, len(sorted_providers))

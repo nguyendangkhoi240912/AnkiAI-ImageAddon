@@ -144,19 +144,6 @@ class ImageHandler:
         if not url:
             raise ImageError("URL không hợp lệ")
 
-        # #region agent log
-        try:
-            from .debug_log import dbg
-            dbg(
-                "image_handler.py:download_image",
-                "download_start",
-                {"url_prefix": url[:80], "format_ok": self._is_supported_format(url)},
-                "A",
-            )
-        except Exception:
-            pass
-        # #endregion
-
         if timeout is None:
             timeout = self.DOWNLOAD_TIMEOUT
         
@@ -198,18 +185,6 @@ class ImageHandler:
                     except Exception as e:
                         logger.warning(f"Image optimization failed: {e}, using original")
                 
-                # #region agent log
-                try:
-                    from .debug_log import dbg
-                    dbg(
-                        "image_handler.py:download_image",
-                        "download_ok",
-                        {"bytes": len(image_data), "content_type": content_type[:40]},
-                        "A",
-                    )
-                except Exception:
-                    pass
-                # #endregion
                 return image_data
 
             except requests.exceptions.Timeout:
@@ -224,18 +199,6 @@ class ImageHandler:
             
             except Exception as e:
                 if attempt == self.MAX_RETRIES - 1:
-                    # #region agent log
-                    try:
-                        from .debug_log import dbg
-                        dbg(
-                            "image_handler.py:download_image",
-                            "download_fail",
-                            {"error": str(e)[:120], "url_prefix": url[:80]},
-                            "A",
-                        )
-                    except Exception:
-                        pass
-                    # #endregion
                     raise ImageError(f"Download error: {str(e)}")
         
         raise ImageError("Download thất bại")

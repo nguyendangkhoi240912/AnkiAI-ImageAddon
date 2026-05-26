@@ -14,15 +14,33 @@ import time
 import threading
 import traceback
 
-# Configure logging - write to file for debugging
-_log_file = os.path.join(os.path.expanduser("~"), "Desktop", "AnkiAI-ImageAddon", "ankiai_debug.log")
-_file_handler = logging.FileHandler(_log_file, mode="w", encoding="utf-8")
-_file_handler.setLevel(logging.DEBUG)
-_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
-_root_logger = logging.getLogger()
-_root_logger.setLevel(logging.DEBUG)
-_root_logger.addHandler(_file_handler)
-logger = logging.getLogger(__name__)
+def _setup_file_logging() -> logging.Logger:
+    """Log to addon/logs/ankiai.log; skip file handler if directory is not writable."""
+    addon_dir = os.path.dirname(os.path.abspath(__file__))
+    log_file = os.path.join(addon_dir, "logs", "ankiai.log")
+    log = logging.getLogger(__name__)
+    try:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        if any(
+            getattr(h, "baseFilename", None) == log_file
+            for h in logging.getLogger().handlers
+            if isinstance(h, logging.FileHandler)
+        ):
+            return log
+        handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+        )
+        root = logging.getLogger()
+        root.setLevel(logging.DEBUG)
+        root.addHandler(handler)
+    except OSError:
+        pass
+    return log
+
+
+logger = _setup_file_logging()
 
 # Import modules
 from .modules.config import get_config_manager
@@ -491,6 +509,11 @@ def on_config_changed(new_config):
     global config_manager
     if config_manager is not None:
         config_manager.config = new_config
+        from .modules.debug_log import configure as configure_debug_log
+
+        configure_debug_log(
+            enabled=bool(new_config.get("enable_agent_debug_log", False)),
+        )
         logger.info("[ADDON] Config updated from Anki editor")
 
 
@@ -503,6 +526,11 @@ def setup_addon():
     try:
         # Khởi tạo các components
         config_manager = get_config_manager()
+        from .modules.debug_log import configure as configure_debug_log
+
+        configure_debug_log(
+            enabled=bool(config_manager.get("enable_agent_debug_log", False)),
+        )
         browser_menu_manager = BrowserMenuManager()
         image_handler = ImageHandler(mw)
         bg_processor = BackgroundProcessor()

@@ -1,5 +1,5 @@
 """
-API Handler Module v5.0 - Multi-AI + 20 image sources + domain routing
+API Handler Module v5.0 - Multi-AI + 20 image sources + domain routing + Imagen 4 Ultra
 """
 
 import logging
@@ -17,6 +17,12 @@ from .provider_registry import (
     build_smart_selector,
     resolve_domains,
     FALLBACK_PROVIDERS,
+    ANIMATED_FALLBACK_PROVIDERS,
+)
+from .imagen_provider import (
+    ImageGenerationPipeline,
+    GeminiImageDescriber,
+    ImagenProvider,
 )
 from .debug_log import dbg
 
@@ -93,6 +99,13 @@ class AIImageProvider:
         enable_adaptive_delay: bool = True,
         base_delay_ms: int = 100,
         max_delay_ms: int = 2000,
+        # Imagen 4 Ultra parameters
+        imagen_enabled: bool = False,
+        imagen_api_key: str = "",
+        imagen_service_account_json: str = "",
+        gemini_image_description_api_key: str = "",
+        gemini_image_description_api_key_backup_1: str = "",
+        gemini_image_description_api_key_backup_2: str = "",
     ):
         try:
             self.ai_provider = MultiAIProvider(
@@ -143,6 +156,36 @@ class AIImageProvider:
             except ImageProviderError as e:
                 raise APIError(str(e))
 
+        # Initialize Imagen 4 Ultra Generation Pipeline
+        self.imagen_pipeline = None
+        if imagen_enabled:
+            try:
+                gemini_desc_keys = [
+                    k for k in [
+                        gemini_image_description_api_key,
+                        gemini_image_description_api_key_backup_1,
+                        gemini_image_description_api_key_backup_2,
+                    ]
+                    if k and k.strip()
+                ]
+                
+                if gemini_desc_keys and imagen_api_key:
+                    self.imagen_pipeline = ImageGenerationPipeline(
+                        gemini_api_keys=gemini_desc_keys,
+                        imagen_api_key=imagen_api_key,
+                        imagen_service_account=imagen_service_account_json,
+                        enable_fallback_to_search=True
+                    )
+                    logger.info("Imagen 4 Ultra Generation Pipeline initialized")
+                else:
+                    logger.warning(
+                        "Imagen enabled but missing API keys: "
+                        f"gemini_desc_keys={len(gemini_desc_keys)}, "
+                        f"imagen_key={bool(imagen_api_key)}"
+                    )
+            except Exception as e:
+                logger.warning(f"Imagen pipeline initialization failed: {e}")
+
         self._result_url_cache: Dict[str, Tuple[str, float]] = {}
 
     def get_image_url(
@@ -185,7 +228,6 @@ class AIImageProvider:
                 self.enable_ai_provider_routing,
                 include_general_fallback=False,
             )
-            # #region agent log
             dbg(
                 "api_handler.py:get_image_url",
                 "search_phase1",
@@ -197,7 +239,6 @@ class AIImageProvider:
                 },
                 "B",
             )
-            # #endregion
 
             candidate_urls = self.smart_selector.search_smart(
                 ctx.keyword,
@@ -213,14 +254,12 @@ class AIImageProvider:
                     self.enable_ai_provider_routing,
                     include_general_fallback=True,
                 )
-                # #region agent log
                 dbg(
                     "api_handler.py:get_image_url",
                     "search_phase2_fallback",
                     {"domains": sorted(domains_fallback)},
                     "B",
                 )
-                # #endregion
                 candidate_urls = self.smart_selector.search_smart(
                     ctx.keyword,
                     top_n=top_n,
@@ -232,7 +271,6 @@ class AIImageProvider:
             if not candidate_urls:
                 raise APIError(f"No images found for: '{ctx.keyword}'")
 
-            # #region agent log
             dbg(
                 "api_handler.py:get_image_url",
                 "search_done",
@@ -245,7 +283,6 @@ class AIImageProvider:
                 },
                 "B",
             )
-            # #endregion
 
             if len(candidate_urls) == 1 or not (
                 self.enable_ai_evaluation and self.image_evaluator
@@ -281,3 +318,165 @@ class AIImageProvider:
         if len(self._result_url_cache) > 500:
             oldest = min(self._result_url_cache, key=lambda k: self._result_url_cache[k][1])
             del self._result_url_cache[oldest]
+
+    def get_animated_image_url(
+        self, vocabulary: str, definition: str, examples: str = ""
+    ) -> str:
+        """Get animated GIF/image URL for vocabulary word.
+        
+        Uses the 'animated' domain to search only animated providers.
+        """
+        result_cache_key = f"animated_{vocabulary}|{definition}".lower()
+        cached_url = self._get_result_cache(result_cache_key)
+        if cached_url:
+            return cached_url
+
+        cache_key = self.context_cache.make_key(vocabulary, definition)
+        ctx = self.context_cache.get(cache_key)
+
+        if not ctx:
+            try:
+                if self.enable_ai_provider_routing:
+                    ctx, _ = self.ai_provider.generate_search_context(
+                        vocabulary, definition, examples
+                    )
+                else:
+                    keyword, _ = self.ai_provider.generate_keyword(
+                        vocabulary, definition, examples
+                    )
+                    ctx = SearchContext(
+                        keyword=keyword, domain="animated", precise_term=keyword
+                    )
+                self.context_cache.set(cache_key, ctx)
+            except AIProviderError as e:
+                raise APIError(f"Keyword generation failed: {e}")
+
+        if not (self.enable_smart_selection and self.smart_selector):
+            raise APIError("Image selection disabled")
+
+        try:
+            # Use animated domain
+            domains_animated = {"animated"}
+            
+            candidate_urls = self.smart_selector.search_smart(
+                ctx.keyword,
+                top_n=1,
+                domains=domains_animated,
+                precise_term=ctx.precise_term,
+                fallback_providers=ANIMATED_FALLBACK_PROVIDERS,
+            )
+
+            if not candidate_urls:
+                raise APIError(f"No animated images found for: '{ctx.keyword}'")
+
+            best_url = candidate_urls[0]
+            self._set_result_cache(result_cache_key, best_url)
+            return best_url
+
+        except ImageProviderError as e:
+            raise APIError(f"Animated image search failed: {e}")
+
+    def generate_image_with_imagen(
+        self, 
+        vocabulary: str, 
+        definition: str, 
+        examples: str = "",
+        width: int = 1024,
+        height: int = 1024,
+        style: str = "photorealistic"
+    ) -> Tuple[Optional[List[bytes]], str, Dict]:
+        """
+        Generate image using Imagen 4 Ultra with Gemini image description guidance.
+        
+        Pipeline:
+        1. Gemini analyzes vocabulary + definition + examples
+        2. Generates detailed image description
+        3. Imagen creates image from description
+        
+        Args:
+            vocabulary: English word
+            definition: Word definition
+            examples: Usage examples
+            width: Image width
+            height: Image height
+            style: Image style (photorealistic, illustration, etc.)
+        
+        Returns:
+            (image_bytes_list, provider_name, metadata_dict)
+        """
+        if not self.imagen_pipeline:
+            raise APIError("Imagen pipeline not initialized")
+        
+        try:
+            logger.info(f"[APIHandler] Generating image for '{vocabulary}' with Imagen...")
+            images, provider, metadata = self.imagen_pipeline.generate_image_for_vocabulary(
+                vocabulary=vocabulary,
+                definition=definition,
+                examples=examples,
+                width=width,
+                height=height,
+                style=style
+            )
+            return images, provider, metadata
+        except Exception as e:
+            raise APIError(f"Imagen generation failed: {e}")
+
+    def generate_image_smart(
+        self,
+        vocabulary: str,
+        definition: str,
+        examples: str = "",
+        prefer_generated: bool = False,
+        width: int = 1024,
+        height: int = 1024,
+        style: str = "photorealistic"
+    ) -> Tuple[Optional[str], str]:
+        """
+        Smart image retrieval: choose between search-based or AI-generated images.
+        
+        Args:
+            vocabulary: English word
+            definition: Word definition
+            examples: Usage examples
+            prefer_generated: Prefer AI-generated over search (if Imagen available)
+            width: For generated images
+            height: For generated images
+            style: Image style for generated images
+        
+        Returns:
+            (image_url_or_path, provider_type) where provider_type is "Search" or "Imagen"
+        """
+        if prefer_generated and self.imagen_pipeline:
+            try:
+                images, provider, metadata = self.generate_image_with_imagen(
+                    vocabulary, definition, examples, width, height, style
+                )
+                if images and len(images) > 0:
+                    # Save image locally and return path
+                    logger.info(f"[APIHandler] Saving generated image for '{vocabulary}'...")
+                    # TODO: Implement image saving to Anki media folder
+                    return "[GENERATED_IMAGE]", "Imagen"
+            except APIError as e:
+                logger.warning(f"Imagen generation failed, falling back to search: {e}")
+        
+        # Fallback to search-based images
+        try:
+            url = self.get_image_url(vocabulary, definition, examples)
+            return url, "Search"
+        except APIError as e:
+            raise APIError(f"Both Imagen and search failed: {e}")
+
+    def is_imagen_available(self) -> bool:
+        """Check if Imagen pipeline is available and healthy"""
+        if not self.imagen_pipeline:
+            return False
+        return self.imagen_pipeline.generator.is_available()
+
+    def get_imagen_stats(self) -> Dict:
+        """Get Imagen generation statistics"""
+        if not self.imagen_pipeline:
+            return {}
+        return {
+            "generation_log_count": len(self.imagen_pipeline.generation_log),
+            "provider_stats": self.imagen_pipeline.generator.get_stats()
+        }

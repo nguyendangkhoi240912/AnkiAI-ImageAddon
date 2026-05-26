@@ -97,6 +97,9 @@ class ConfigManager:
         
         # Other
         "auto_add_on_sync": False,
+
+        # Development: NDJSON trace log under addon/logs/ (off in production)
+        "enable_agent_debug_log": False,
     }
     
     # Tên thư mục addon (dùng để Anki đọc/ghi config đúng)

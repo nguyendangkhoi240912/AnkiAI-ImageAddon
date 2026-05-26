@@ -30,6 +30,13 @@ from .scientific import (
     CodeCogsProvider,
     BioiconsProvider,
 )
+from .animated import (
+    KLIPYProvider,
+    GIPHYProvider,
+    TenorProvider,
+    PixabayAnimatedProvider,
+    IconScoutProvider,
+)
 
 __all__ = [
     "ImageProviderError",
@@ -58,4 +65,9 @@ __all__ = [
     "NASAImagesProvider",
     "CodeCogsProvider",
     "BioiconsProvider",
+    "KLIPYProvider",
+    "GIPHYProvider",
+    "TenorProvider",
+    "PixabayAnimatedProvider",
+    "IconScoutProvider",
 ]
