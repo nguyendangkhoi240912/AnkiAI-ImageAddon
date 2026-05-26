@@ -119,11 +119,19 @@ class AddImageTask(ProcessingTask):
             
             logger.info(f"📌 Got image URL: {image_url[:80]}...")
             
-            # 4. Xử lý ảnh
+            # 4. Xử lý ảnh (retry fallback URLs if download fails)
             logger.debug(f"📌 Processing image for '{vocabulary}'...")
             success, message = self.image_handler.process_image(
                 image_url, note, vocabulary, self.image_field
             )
+            if not success and "Download" in message:
+                for alt_url in self.ai_provider.get_fallback_image_urls():
+                    logger.info(f"📌 Retrying download: {alt_url[:80]}...")
+                    success, message = self.image_handler.process_image(
+                        alt_url, note, vocabulary, self.image_field
+                    )
+                    if success:
+                        break
             
             logger.info(f"📌 Image processing result: success={success}, msg={message}")
             
