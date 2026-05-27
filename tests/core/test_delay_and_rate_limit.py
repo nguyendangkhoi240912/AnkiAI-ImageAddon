@@ -21,7 +21,7 @@ class TestAdaptiveDelayManager:
         
         # Increase multiple times
         for _ in range(10):
-            manager.increase_delay("test_provider", 100)
+            manager.increase_delay("test_provider", is_rate_limit=False)
         
         # Should be capped at max
         assert manager.get_delay("test_provider") <= 0.2
@@ -29,7 +29,7 @@ class TestAdaptiveDelayManager:
     def test_reset_delay_if_expired(self):
         """Test that delay resets after expiration time."""
         manager = AdaptiveDelayManager(base_delay_ms=100, max_delay_ms=2000)
-        manager.increase_delay("test_provider", 500)
+        manager.increase_delay("test_provider", is_rate_limit=True)
         
         # Not expired yet
         manager.reset_delay_if_expired("test_provider", reset_hours=1)
@@ -59,29 +59,30 @@ class TestRateLimitHandler:
 
     def test_not_rate_limited_initially(self):
         """Test that provider is not rate limited initially."""
-        handler = RateLimitHandler(pause_duration=60)
+        handler = RateLimitHandler()
         assert not handler.is_rate_limited("test_provider")
 
     def test_rate_limited_after_handle(self):
         """Test that provider is rate limited after handle_rate_limit."""
-        handler = RateLimitHandler(pause_duration=60)
+        handler = RateLimitHandler()
         handler.handle_rate_limit("test_provider")
         
         assert handler.is_rate_limited("test_provider")
 
     def test_rate_limit_expires(self):
         """Test that rate limit expires after pause duration."""
-        handler = RateLimitHandler(pause_duration=1)  # 1 second for testing
+        handler = RateLimitHandler()
         handler.handle_rate_limit("test_provider")
         
-        # Wait for expiration
-        time.sleep(1.1)
+        # Simulate expiration by shifting last_rate_limit back in time
+        from datetime import timedelta
+        handler.last_rate_limit["test_provider"] -= timedelta(seconds=5)
         
         assert not handler.is_rate_limited("test_provider")
 
     def test_wait_if_limited(self):
         """Test wait_if_limited returns correct boolean."""
-        handler = RateLimitHandler(pause_duration=60)
+        handler = RateLimitHandler()
         
         # Not limited
         assert not handler.wait_if_limited("test_provider")
