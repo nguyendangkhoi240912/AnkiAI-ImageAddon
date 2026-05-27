@@ -32,6 +32,44 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# 🟡 MEDIUM FIX v5.1: Global HTTP session to avoid connection leaks
+# Shared across all threads instead of per-instance
+_GLOBAL_HTTP_SESSION = None
+_SESSION_LOCK = threading.Lock()
+
+def _get_global_session() -> requests.Session:
+    """Get or create global HTTP session with connection pooling"""
+    global _GLOBAL_HTTP_SESSION
+    
+    with _SESSION_LOCK:
+        if _GLOBAL_HTTP_SESSION is None:
+            _GLOBAL_HTTP_SESSION = _create_pooled_session()
+        return _GLOBAL_HTTP_SESSION
+
+def _create_pooled_session() -> requests.Session:
+    """Create HTTP session with connection pooling"""
+    session = requests.Session()
+    
+    retry_strategy = Retry(
+        total=2,
+        backoff_factor=0.1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "HEAD", "OPTIONS"]
+    )
+    
+    adapter = HTTPAdapter(
+        max_retries=retry_strategy,
+        pool_connections=10,      # Reuse up to 10 connections
+        pool_maxsize=10,          # Max 10 concurrent connections (global)
+        pool_block=False
+    )
+    
+    session.mount('https://', adapter)
+    session.mount('http://', adapter)
+    
+    return session
+
+
 class ImageError(Exception):
     """Exception cho image operations"""
     pass
@@ -62,33 +100,9 @@ class ImageHandler:
         self.col = mw.col
         self.lock = threading.Lock()  # For thread-safe operations
         
-        # 🚀 Create persistent HTTP session with connection pooling
-        self.session = self._create_session()
-    
-    def _create_session(self) -> requests.Session:
-        """Create optimized session with connection pooling & retry logic"""
-        session = requests.Session()
-        
-        # 🚀 Configure retry strategy for resilience
-        retry_strategy = Retry(
-            total=2,
-            backoff_factor=0.1,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET", "HEAD", "OPTIONS"]
-        )
-        
-        # 🚀 Configure adapter with connection pooling
-        adapter = HTTPAdapter(
-            max_retries=retry_strategy,
-            pool_connections=5,      # Reuse up to 5 connections
-            pool_maxsize=5,           # Max 5 concurrent connections
-            pool_block=False          # Don't block when pool is full
-        )
-        
-        session.mount('https://', adapter)
-        session.mount('http://', adapter)
-        
-        return session
+        # 🟡 MEDIUM FIX v5.1: Use global HTTP session instead of per-instance
+        # Reduces connection leaks and improves pooling efficiency
+        self.session = _get_global_session()
     
     def _is_supported_format(self, url: str) -> bool:
         """
@@ -128,6 +142,29 @@ class ImageHandler:
         
         content_type = content_type.lower().split(";")[0]  # Remove charset params
         return content_type in self.SUPPORTED_MIMETYPES
+    
+    def _is_animated_format(self, content_type: str, url: str = "") -> bool:
+        """🟡 MEDIUM FIX v5.1: Detect animated/complex formats that shouldn't be optimized"""
+        mime_lower = (content_type or "").lower()
+        url_lower = (url or "").lower()
+        
+        # Animated formats
+        if "image/gif" in mime_lower:
+            return True
+        if "image/webp" in mime_lower and ("animated" in mime_lower or "webp" in url_lower):
+            return True
+        
+        # SVG and other vector formats (complex)
+        if "image/svg" in mime_lower:
+            return True
+        
+        # Check URL for animated indicators
+        if ".gif" in url_lower:
+            return True
+        if ".webp" in url_lower and ("anim" in url_lower or "animated" in url_lower):
+            return True
+        
+        return False
     
     def download_image(self, url: str, timeout: int = None, optimize: bool = True) -> bytes:
         """
@@ -178,8 +215,18 @@ class ImageHandler:
                         "Không thể xác định định dạng ảnh: không có Content-Type header"
                     )
                 
-                # Optimize if PIL available
-                if optimize and HAS_PIL:
+                # 🟡 MEDIUM FIX v5.1: Check format BEFORE optimization
+                # Skip optimization for animated/complex formats
+                should_optimize = optimize and HAS_PIL
+                if should_optimize:
+                    # Check if this is an animated or complex format
+                    is_animated = self._is_animated_format(content_type, url)
+                    if is_animated:
+                        logger.info(f"⏭️  Skipping optimization for animated format: {content_type}")
+                        should_optimize = False
+                
+                # Optimize if PIL available and format permits
+                if should_optimize:
                     try:
                         image_data = self._optimize_image(image_data)
                     except Exception as e:

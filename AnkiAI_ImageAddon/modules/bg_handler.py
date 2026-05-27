@@ -14,6 +14,10 @@ import logging
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# 🔒 CRITICAL FIX v5.1: Global database lock to prevent race conditions
+# Prevents simultaneous col.update_note() and col.save() from corrupting Anki DB
+_GLOBAL_DB_LOCK = threading.RLock()  # RLock allows re-entry by same thread
+
 
 class BackgroundProcessor:
     """
@@ -57,6 +61,16 @@ class BackgroundProcessor:
                 total = len(note_ids)
                 logger.info(f"🚀 Starting background work: Processing {total} notes (concurrent)")
                 
+                # 🟡 MEDIUM FIX v5.1: Pre-load all notes to avoid N+1 queries
+                logger.info(f"📋 Pre-loading {total} notes from database...")
+                notes_dict = {}
+                for nid in note_ids:
+                    try:
+                        notes_dict[nid] = col.get_note(nid)
+                    except Exception as e:
+                        logger.warning(f"Failed to pre-load note {nid}: {e}")
+                logger.info(f"✅ Pre-loaded {len(notes_dict)} notes successfully")
+                
                 db_lock = threading.Lock()
                 completed = [0]  # Use list for mutability in closure
                 
@@ -66,8 +80,12 @@ class BackgroundProcessor:
                         return (False, "Đã hủy")
                     
                     try:
-                        note = col.get_note(note_id)
-                        logger.debug(f"📌 [{index + 1}/{total}] Retrieved note {note_id}: {note.keys()}")
+                        # 🟡 MEDIUM FIX: Lookup from pre-loaded dict instead of DB query
+                        note = notes_dict.get(note_id)
+                        if not note:
+                            return (False, f"Note {note_id} not found in pre-loaded cache")
+                        
+                        logger.debug(f"📌 [{index + 1}/{total}] Retrieved note {note_id} from cache: {note.keys()}")
                         
                         # Process note (AI + image search + download - all network I/O)
                         result = process_func(note)
@@ -125,7 +143,9 @@ class BackgroundProcessor:
                 
                 # Save all changes at once
                 logger.info(f"💾 Saving database... (processed {total} notes)")
-                col.save()
+                # 🔒 CRITICAL FIX v5.1: Use global lock for col.save()
+                with _GLOBAL_DB_LOCK:
+                    col.save()
                 logger.info(f"✅ Database saved successfully!")
                 
                 return {"results": results, "errors": errors}

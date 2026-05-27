@@ -13,6 +13,7 @@ import re
 import time
 import threading
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def _setup_file_logging() -> logging.Logger:
     """Log to addon/logs/ankiai.log; skip file handler if directory is not writable."""
@@ -124,14 +125,39 @@ class AddImageTask(ProcessingTask):
             success, message = self.image_handler.process_image(
                 image_url, note, vocabulary, self.image_field
             )
+            
+            # 🚀 CRITICAL FIX v5.1: Parallel fallback retry instead of blocking
             if not success and "Download" in message:
-                for alt_url in self.ai_provider.get_fallback_image_urls():
-                    logger.info(f"📌 Retrying download: {alt_url[:80]}...")
-                    success, message = self.image_handler.process_image(
-                        alt_url, note, vocabulary, self.image_field
-                    )
-                    if success:
-                        break
+                fallback_urls = self.ai_provider.get_fallback_image_urls()
+                if fallback_urls:
+                    logger.info(f"📌 Primary URL failed, trying {len(fallback_urls)} fallback URLs in parallel...")
+                    
+                    def try_fallback_url(url):
+                        """Try to download fallback URL"""
+                        try:
+                            return self.image_handler.process_image(
+                                url, note, vocabulary, self.image_field
+                            )
+                        except Exception as e:
+                            return False, str(e)
+                    
+                    # Parallel retry: first successful result wins
+                    with ThreadPoolExecutor(max_workers=3) as executor:
+                        futures = {
+                            executor.submit(try_fallback_url, url): url 
+                            for url in fallback_urls
+                        }
+                        
+                        for future in as_completed(futures, timeout=24):  # 24s timeout for all
+                            try:
+                                result_success, result_msg = future.result()
+                                if result_success:
+                                    success, message = True, result_msg
+                                    logger.info(f"✅ Fallback URL succeeded: {futures[future][:80]}")
+                                    break  # First success wins
+                            except Exception as e:
+                                logger.debug(f"Fallback URL failed: {str(e)}")
+                                pass
             
             logger.info(f"📌 Image processing result: success={success}, msg={message}")
             

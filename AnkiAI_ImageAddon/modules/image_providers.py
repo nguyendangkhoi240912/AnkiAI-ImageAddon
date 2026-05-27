@@ -52,10 +52,11 @@ logger = logging.getLogger(__name__)
 
 
 class AdaptiveDelayManager:
-    def __init__(self, base_delay_ms: int = 100, max_delay_ms: int = 2000):
+    def __init__(self, base_delay_ms: int = 100, max_delay_ms: int = 300000):  # 300s max
         self.base_delay = base_delay_ms / 1000.0
         self.max_delay = max_delay_ms / 1000.0
         self.provider_delays: Dict[str, float] = {}
+        self.provider_retry_count: Dict[str, int] = {}  # Track retry attempts
         self.last_failure_time: Dict[str, float] = {}
         self.lock = threading.Lock()
 
@@ -63,47 +64,85 @@ class AdaptiveDelayManager:
         with self.lock:
             return self.provider_delays.get(provider_name, self.base_delay)
 
-    def increase_delay(self, provider_name: str, increase_ms: int):
+    def increase_delay(self, provider_name: str, is_rate_limit: bool = False):
+        """🚀 CRITICAL FIX v5.1: Exponential backoff instead of linear"""
         with self.lock:
-            current = self.provider_delays.get(provider_name, self.base_delay)
-            new_delay = min(current + increase_ms / 1000.0, self.max_delay)
+            retry_count = self.provider_retry_count.get(provider_name, 0)
+            
+            if is_rate_limit:
+                # Aggressive exponential backoff: 2^n seconds
+                new_delay = min(2 ** retry_count, self.max_delay)
+                logger.warning(
+                    f"{provider_name} rate limited - exponential backoff: "
+                    f"{new_delay:.1f}s (retry #{retry_count + 1})"
+                )
+            else:
+                # Progressive backoff for other errors: 0.5 + 2^n
+                new_delay = min(0.5 * (2 ** retry_count), self.max_delay)
+            
             self.provider_delays[provider_name] = new_delay
+            self.provider_retry_count[provider_name] = retry_count + 1
             self.last_failure_time[provider_name] = time.time()
 
-    def reset_delay_if_expired(self, provider_name: str, reset_hours: int = 1):
+    def reset_delay_if_expired(self, provider_name: str, reset_hours: int = 2):
+        """Reset exponential backoff after delay period"""
         with self.lock:
             if provider_name in self.last_failure_time:
                 elapsed = time.time() - self.last_failure_time[provider_name]
-                if elapsed > reset_hours * 3600:
+                # Reset if elapsed time > max delay
+                if elapsed > self.provider_delays.get(provider_name, self.base_delay):
                     self.provider_delays[provider_name] = self.base_delay
+                    self.provider_retry_count[provider_name] = 0
                     del self.last_failure_time[provider_name]
 
     def apply_delay(self, provider_name: str):
         delay = self.get_delay(provider_name)
         if delay > 0:
+            logger.info(f"⏸️  Applying delay for {provider_name}: {delay:.1f}s")
             time.sleep(delay)
 
 
 class RateLimitHandler:
-    def __init__(self, pause_duration: int = 60):
+    """🚀 CRITICAL FIX v5.1: Proper rate limit handling with exponential backoff"""
+    def __init__(self):
         self.last_rate_limit: Dict[str, datetime] = {}
-        self.pause_duration = pause_duration
+        self.rate_limit_backoff: Dict[str, int] = {}  # Retry count per provider
         self.lock = threading.Lock()
 
     def is_rate_limited(self, provider_name: str) -> bool:
         with self.lock:
             if provider_name not in self.last_rate_limit:
                 return False
+            
+            retry_count = self.rate_limit_backoff.get(provider_name, 0)
+            backoff_seconds = min(2 ** retry_count, 300)  # Max 5 minutes
+            
             elapsed = datetime.now() - self.last_rate_limit[provider_name]
-            if elapsed.total_seconds() < self.pause_duration:
+            if elapsed.total_seconds() < backoff_seconds:
+                remaining = backoff_seconds - elapsed.total_seconds()
+                logger.info(
+                    f"{provider_name} rate limited - waiting {remaining:.1f}s "
+                    f"(exponential backoff #{retry_count})"
+                )
                 return True
+            
+            # Backoff expired, clear it
             del self.last_rate_limit[provider_name]
+            self.rate_limit_backoff[provider_name] = 0
             return False
 
     def handle_rate_limit(self, provider_name: str):
+        """Mark provider as rate limited and apply exponential backoff"""
         with self.lock:
+            retry_count = self.rate_limit_backoff.get(provider_name, 0)
             self.last_rate_limit[provider_name] = datetime.now()
-            logger.warning(f"{provider_name} rate limited - pause {self.pause_duration}s")
+            self.rate_limit_backoff[provider_name] = retry_count + 1
+            
+            backoff_seconds = min(2 ** retry_count, 300)
+            logger.warning(
+                f"🛑 {provider_name} rate limited - exponential backoff: "
+                f"{backoff_seconds}s (attempt #{retry_count + 1})"
+            )
 
     def wait_if_limited(self, provider_name: str) -> bool:
         return self.is_rate_limited(provider_name)
