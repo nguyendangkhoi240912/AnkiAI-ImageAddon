@@ -15,7 +15,6 @@ from .ai_providers import (
     MultiAIProvider,
     AIProviderError,
     GeminiImageEvaluator,
-    SearchContext,
 )
 from .image_providers import ImageProviderError
 from .provider_registry import (
@@ -78,6 +77,35 @@ _url_cache = URLCache()
 class APIError(Exception):
     """Exception cho API calls"""
     pass
+
+
+class SearchContext:
+    """Encapsulates search context with keyword, domain, and precise term"""
+    
+    def __init__(self, keyword: str, domain: str, precise_term: str):
+        self.keyword = keyword
+        self.domain = domain
+        self.precise_term = precise_term
+    
+    def to_json(self) -> str:
+        """Convert to JSON string for caching"""
+        import json
+        return json.dumps({
+            "keyword": self.keyword,
+            "domain": self.domain,
+            "precise_term": self.precise_term,
+        })
+    
+    @staticmethod
+    def from_json(json_str: str) -> "SearchContext":
+        """Create SearchContext from JSON string"""
+        import json
+        data = json.loads(json_str)
+        return SearchContext(
+            keyword=data["keyword"],
+            domain=data["domain"],
+            precise_term=data["precise_term"],
+        )
 
 
 class SearchContextCache:
