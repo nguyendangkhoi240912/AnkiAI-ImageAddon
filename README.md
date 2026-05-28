@@ -6,7 +6,6 @@
 
 **AnkiAI ImageAddon** là một Anki add-on mạnh mẽ giúp bạn:
 
-- ✨ **Tự động tạo ảnh** bằng DALL-E 3 (AI vẽ ảnh từ cách tả)
 - 🔍 **Tìm kiếm ảnh tĩnh** từ 15+ nguồn (Pexels, Unsplash, Pixabay, v.v.)
 - 🎬 **Tìm kiếm ảnh động** từ 5 nền tảng GIF chuyên nghiệp
 - 🤖 **AI-powered**: ChatGPT/Gemini tạo keyword tự động từ định nghĩa
