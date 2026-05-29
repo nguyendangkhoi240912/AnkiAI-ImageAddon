@@ -5,7 +5,7 @@ Performance optimizations: connection pooling, caching, retry strategy
 
 import logging
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from functools import lru_cache
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
@@ -15,6 +15,7 @@ from .ai_providers import (
     MultiAIProvider,
     AIProviderError,
     GeminiImageEvaluator,
+    SearchContext,
 )
 from .image_providers import ImageProviderError
 from .provider_registry import (
@@ -77,35 +78,6 @@ _url_cache = URLCache()
 class APIError(Exception):
     """Exception cho API calls"""
     pass
-
-
-class SearchContext:
-    """Encapsulates search context with keyword, domain, and precise term"""
-    
-    def __init__(self, keyword: str, domain: str, precise_term: str):
-        self.keyword = keyword
-        self.domain = domain
-        self.precise_term = precise_term
-    
-    def to_json(self) -> str:
-        """Convert to JSON string for caching"""
-        import json
-        return json.dumps({
-            "keyword": self.keyword,
-            "domain": self.domain,
-            "precise_term": self.precise_term,
-        })
-    
-    @staticmethod
-    def from_json(json_str: str) -> "SearchContext":
-        """Create SearchContext from JSON string"""
-        import json
-        data = json.loads(json_str)
-        return SearchContext(
-            keyword=data["keyword"],
-            domain=data["domain"],
-            precise_term=data["precise_term"],
-        )
 
 
 class SearchContextCache:
@@ -225,6 +197,34 @@ class AIImageProvider:
 
         self._result_url_cache: Dict[str, Tuple[str, float]] = {}
         self._last_candidate_urls: List[str] = []
+
+        # Imagen support (v5.0)
+        self.imagen_enabled = provider_config.get("imagen_enabled", False) if provider_config else False
+        self.imagen_api_key = provider_config.get("imagen_api_key", "") if provider_config else ""
+        self.gemini_desc_keys = [
+            provider_config.get("gemini_image_description_api_key", ""),
+            provider_config.get("gemini_image_description_api_key_backup_1", ""),
+            provider_config.get("gemini_image_description_api_key_backup_2", "")
+        ] if provider_config else []
+        self.gemini_desc_keys = [k for k in self.gemini_desc_keys if k and k.strip()]
+        self.imagen_service_account = provider_config.get("imagen_service_account_json", "") if provider_config else ""
+        self.imagen_fallback_to_search = provider_config.get("imagen_fallback_to_search_providers", True) if provider_config else True
+        self.imagen_default_style = provider_config.get("imagen_default_style", "photorealistic") if provider_config else "photorealistic"
+        self.imagen_default_size = provider_config.get("imagen_default_size", "1024x1024") if provider_config else "1024x1024"
+
+        self.pipeline = None
+        if self.imagen_enabled and self.imagen_api_key and self.gemini_desc_keys:
+            try:
+                from .imagen_provider import ImageGenerationPipeline
+                self.pipeline = ImageGenerationPipeline(
+                    gemini_api_keys=self.gemini_desc_keys,
+                    imagen_api_key=self.imagen_api_key,
+                    imagen_service_account=self.imagen_service_account,
+                    enable_fallback_to_search=self.imagen_fallback_to_search
+                )
+                logger.info("✓ Imagen Generation Pipeline initialized in AIImageProvider")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Imagen pipeline: {e}")
 
     def get_image_url(
         self, vocabulary: str, definition: str, examples: str = ""
@@ -369,3 +369,80 @@ class AIImageProvider:
         if len(self._result_url_cache) > 500:
             oldest = min(self._result_url_cache, key=lambda k: self._result_url_cache[k][1])
             del self._result_url_cache[oldest]
+
+    def generate_image_with_imagen(
+        self,
+        vocabulary: str,
+        definition: str,
+        examples: str = "",
+        width: int = 1024,
+        height: int = 1024,
+        style: str = "photorealistic"
+    ) -> Tuple[Optional[List[bytes]], str, Dict]:
+        """Tạo ảnh bằng Imagen 4 Ultra"""
+        if not self.pipeline:
+            raise APIError("Imagen pipeline is not initialized or enabled")
+
+        try:
+            return self.pipeline.generate_image_for_vocabulary(
+                vocabulary=vocabulary,
+                definition=definition,
+                examples=examples,
+                width=width,
+                height=height,
+                style=style
+            )
+        except Exception as e:
+            logger.error(f"Error in generate_image_with_imagen: {e}")
+            raise APIError(f"Imagen generation failed: {e}")
+
+    def generate_image_smart(
+        self,
+        vocabulary: str,
+        definition: str,
+        examples: str = "",
+        prefer_generated: bool = True,
+        width: int = 1024,
+        height: int = 1024,
+        style: str = "photorealistic"
+    ) -> Tuple[Optional[Any], str]:
+        """
+        Chọn tự động: search-based vs generated.
+        Trả về: (url_or_bytes, source)
+        """
+        if prefer_generated and self.pipeline and self.imagen_enabled:
+            try:
+                logger.info(f"Smart selection: trying Imagen generation first for '{vocabulary}'...")
+                images, provider_name, metadata = self.generate_image_with_imagen(
+                    vocabulary=vocabulary,
+                    definition=definition,
+                    examples=examples,
+                    width=width,
+                    height=height,
+                    style=style
+                )
+                if images and len(images) > 0:
+                    return images[0], "Imagen"
+                logger.info("Imagen returned no images, falling back to search providers...")
+            except Exception as e:
+                logger.warning(f"Imagen generation failed during smart selection: {e}. Falling back to search...")
+
+        # Fallback to traditional search
+        logger.info(f"Smart selection: searching for '{vocabulary}'...")
+        url = self.get_image_url(vocabulary, definition, examples)
+        return url, "Search"
+
+    def is_imagen_available(self) -> bool:
+        """Kiểm tra health của Imagen"""
+        if not self.pipeline or not self.pipeline.generator:
+            return False
+        return self.pipeline.generator.is_available()
+
+    def get_imagen_stats(self) -> Dict:
+        """Lấy thống kê sử dụng của Imagen"""
+        if not self.pipeline or not self.pipeline.generator:
+            return {}
+        return {
+            "provider_stats": self.pipeline.generator.get_stats(),
+            "generation_log": self.pipeline.generation_log
+        }

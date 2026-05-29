@@ -100,6 +100,36 @@ class ConfigManager:
 
         # Development: NDJSON trace log under addon/logs/ (off in production)
         "enable_agent_debug_log": False,
+
+        # Skip existing images configuration (v5.1)
+        "skip_existing_images": True,
+
+        # Animated/GIF search API keys (v5.0)
+        "klipy_app_key": "",
+        "giphy_api_key": "",
+        "tenor_api_key": "",
+        "iconscout_api_token": "",
+
+        # Gemini image description keys (v5.0)
+        "gemini_image_description_api_key": "",
+        "gemini_image_description_api_key_backup_1": "",
+        "gemini_image_description_api_key_backup_2": "",
+        "enable_gemini_image_description": True,
+
+        # Imagen 4 Ultra keys (v5.0)
+        "imagen_enabled": False,
+        "imagen_api_key": "",
+        "imagen_service_account_json": "",
+        "imagen_endpoint": "https://generativelanguage.googleapis.com/v1beta/models/imagen-3-ultra:generateContent",
+        "imagen_timeout_seconds": 25,
+        "imagen_max_concurrent_requests": 2,
+        "imagen_request_retries": 2,
+        "imagen_cost_warning_threshold_usd": 5.0,
+        "imagen_fallback_to_search_providers": True,
+        "imagen_default_style": "photorealistic",
+        "imagen_default_size": "1024x1024",
+        "imagen_enable_safety_checking": True,
+        "imagen_enable_cost_tracking": True,
     }
     
     # Tên thư mục addon (dùng để Anki đọc/ghi config đúng)

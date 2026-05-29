@@ -78,6 +78,7 @@
     "examples_field": "Ví dụ",
     "image_field": "Ảnh",
     "image_generation_mode": "search",
+    "skip_existing_images": true,
 
     "max_concurrent_requests": 5,
     "enable_concurrent_downloads": true,

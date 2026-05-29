@@ -212,9 +212,9 @@ class ConfigDialog(QDialog):
         """Tạo giao diện config"""
         from aqt.qt import QLineEdit, QCheckBox, QScrollArea
         
-        self.setWindowTitle("AnkiAI v4.2 - Cài đặt (Multi-Gemini + 15+ Image Providers + Rate-Limit Protection)")
+        self.setWindowTitle("AnkiAI v5.0 - Cài đặt (Multi-Gemini + 20+ Image/GIF Providers + AI Image Generation)")
         self.setMinimumWidth(650)
-        self.setMinimumHeight(800)
+        self.setMinimumHeight(850)
         
         main_layout = QVBoxLayout()
         
@@ -223,8 +223,17 @@ class ConfigDialog(QDialog):
         scroll.setWidgetResizable(True)
         scroll_widget = QVBoxLayout()
         
+        # ✨ NEW v5.0: Image Generation Mode
+        scroll_widget.addWidget(QLabel("🎨 Chế độ hoạt động chính (Image Generation Mode):"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Tìm kiếm ảnh thông thường (Search Mode)", "search")
+        self.mode_combo.addItem("Tạo ảnh bằng AI độc nhất (AI Generation Mode - Imagen)", "generate")
+        self.mode_combo.addItem("Tự động thông minh (Smart Selection Mode)", "smart")
+        self.mode_combo.setToolTip("Chọn cách hoạt động: Tìm kiếm từ các nguồn có sẵn hoặc tự động tạo ảnh bằng AI Imagen 4 Ultra.")
+        scroll_widget.addWidget(self.mode_combo)
+        
         # AI Providers (v4.2 - Multi-key Gemini)
-        scroll_widget.addWidget(QLabel("🤖 AI Providers (cấu hình ít nhất một):"))
+        scroll_widget.addWidget(QLabel("\n🤖 AI Providers cho Từ khóa & Định nghĩa (cấu hình ít nhất một):"))
         
         # Groq API Key
         scroll_widget.addWidget(QLabel("Groq API Key (⭐ Nên dùng - siêu nhanh, miễn phí):"))
@@ -266,7 +275,7 @@ class ConfigDialog(QDialog):
         scroll_widget.addWidget(self.ollama_url_input)
         
         # ✨ Image Search Providers (15+ sources - v4.2)
-        scroll_widget.addWidget(QLabel("\n📷 Image Search Providers (15+ sources - cấu hình ít nhất một):"))
+        scroll_widget.addWidget(QLabel("\n📷 Image Search Providers (Cấu hình ít nhất một nếu dùng Search Mode):"))
         
         scroll_widget.addWidget(QLabel("Pexels API Key (⭐ Nên cấu hình - nhanh, chất lượng cao):"))
         self.pexels_input = QLineEdit()
@@ -285,6 +294,33 @@ class ConfigDialog(QDialog):
         self.europeana_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.europeana_input.setPlaceholderText("Get from: pro.europeana.eu/page/apis")
         scroll_widget.addWidget(self.europeana_input)
+        
+        # ✨ NEW v5.0: GIF / Animated Image Providers
+        scroll_widget.addWidget(QLabel("\n🎬 Animated GIF & Icon Providers (Cấu hình tùy chọn cho ảnh động):"))
+        
+        scroll_widget.addWidget(QLabel("KLIPY App Key (⭐ Nên dùng cho ảnh động - Free):"))
+        self.klipy_input = QLineEdit()
+        self.klipy_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.klipy_input.setPlaceholderText("Get from: klipy.ai / api.klipy.ai")
+        scroll_widget.addWidget(self.klipy_input)
+        
+        scroll_widget.addWidget(QLabel("GIPHY API Key (Beta key cho ảnh động):"))
+        self.giphy_input = QLineEdit()
+        self.giphy_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.giphy_input.setPlaceholderText("Get from: developers.giphy.com")
+        scroll_widget.addWidget(self.giphy_input)
+        
+        scroll_widget.addWidget(QLabel("Tenor API Key (Sẽ hết hạn sau 30/06/2026):"))
+        self.tenor_input = QLineEdit()
+        self.tenor_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.tenor_input.setPlaceholderText("Get from: Google Cloud Console")
+        scroll_widget.addWidget(self.tenor_input)
+        
+        scroll_widget.addWidget(QLabel("IconScout API Token (Cho Animated Icons):"))
+        self.iconscout_input = QLineEdit()
+        self.iconscout_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.iconscout_input.setPlaceholderText("Get from: iconscout.com/api")
+        scroll_widget.addWidget(self.iconscout_input)
         
         # 🆕 v4.4: Gemini Image Evaluator - 7 API keys with auto-failover
         scroll_widget.addWidget(QLabel("\n🎯 Gemini Image Evaluator (7 API Keys - Auto Failover v4.4):"))
@@ -305,6 +341,56 @@ class ConfigDialog(QDialog):
             scroll_widget.addWidget(label)
             scroll_widget.addWidget(input_field)
             self.gemini_eval_inputs.append(input_field)
+            
+        # 🆕 v5.0: AI Image Generation (Google Imagen 4 Ultra)
+        scroll_widget.addWidget(QLabel("\n🔮 AI Image Generation (Google Imagen 4 Ultra):"))
+        
+        self.enable_imagen_checkbox = QCheckBox("Kích hoạt tự động tạo ảnh bằng AI Imagen 4 Ultra")
+        self.enable_imagen_checkbox.setToolTip("Sử dụng Imagen 4 Ultra để tự sinh ảnh độc nhất dựa trên từ vựng")
+        scroll_widget.addWidget(self.enable_imagen_checkbox)
+        
+        scroll_widget.addWidget(QLabel("Imagen API Key (Google AI Studio Key):"))
+        self.imagen_api_key_input = QLineEdit()
+        self.imagen_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.imagen_api_key_input.setPlaceholderText("Get from: aistudio.google.com")
+        scroll_widget.addWidget(self.imagen_api_key_input)
+        
+        self.enable_gemini_desc_checkbox = QCheckBox("Sử dụng Gemini để tự động viết mô tả ảnh chi tiết (Prompt Guide)")
+        self.enable_gemini_desc_checkbox.setToolTip("Gemini sẽ tự động phân tích nghĩa và ví dụ để viết Prompt Guide chi tiết gửi sang Imagen.")
+        self.enable_gemini_desc_checkbox.setChecked(True)
+        scroll_widget.addWidget(self.enable_gemini_desc_checkbox)
+        
+        scroll_widget.addWidget(QLabel("Gemini Description API Key (Primary):"))
+        self.gemini_desc_input = QLineEdit()
+        self.gemini_desc_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.gemini_desc_input.setPlaceholderText("Get from: aistudio.google.com")
+        scroll_widget.addWidget(self.gemini_desc_input)
+        
+        scroll_widget.addWidget(QLabel("Gemini Description API Key (Backup 1):"))
+        self.gemini_desc_backup1_input = QLineEdit()
+        self.gemini_desc_backup1_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.gemini_desc_backup1_input.setPlaceholderText("Leave blank if not needed")
+        scroll_widget.addWidget(self.gemini_desc_backup1_input)
+        
+        scroll_widget.addWidget(QLabel("Gemini Description API Key (Backup 2):"))
+        self.gemini_desc_backup2_input = QLineEdit()
+        self.gemini_desc_backup2_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.gemini_desc_backup2_input.setPlaceholderText("Leave blank if not needed")
+        scroll_widget.addWidget(self.gemini_desc_backup2_input)
+        
+        scroll_widget.addWidget(QLabel("Phong cách ảnh mặc định (Default Style):"))
+        self.imagen_style_combo = QComboBox()
+        self.imagen_style_combo.addItems(["photorealistic", "illustration", "cartoon", "painting", "3d"])
+        scroll_widget.addWidget(self.imagen_style_combo)
+        
+        scroll_widget.addWidget(QLabel("Kích thước ảnh mặc định (Default Size):"))
+        self.imagen_size_combo = QComboBox()
+        self.imagen_size_combo.addItems(["1024x1024", "512x512", "256x256", "1536x1536"])
+        scroll_widget.addWidget(self.imagen_size_combo)
+        
+        self.imagen_fallback_checkbox = QCheckBox("Tự động chuyển về tìm kiếm (Search Fallback) nếu sinh ảnh lỗi")
+        self.imagen_fallback_checkbox.setChecked(True)
+        scroll_widget.addWidget(self.imagen_fallback_checkbox)
         
         # ✨ NEW v4.2 Rate Limit Protection
         scroll_widget.addWidget(QLabel("\n⚡ Rate Limit Protection (v4.2):"))
@@ -318,6 +404,13 @@ class ConfigDialog(QDialog):
         self.rate_limit_pause_input.setText("60")
         self.rate_limit_pause_input.setPlaceholderText("Default: 60 seconds")
         scroll_widget.addWidget(self.rate_limit_pause_input)
+        
+        # ✨ NEW v5.1 Skip Existing Images
+        scroll_widget.addWidget(QLabel("\n⚙️ Tùy chọn xử lý ảnh (v5.1):"))
+        self.skip_existing_images_checkbox = QCheckBox("Tự động bỏ qua các thẻ đã có ảnh sẵn")
+        self.skip_existing_images_checkbox.setToolTip("Nếu bật, các thẻ đã có sẵn hình ảnh trong field Ảnh sẽ được tự động bỏ qua để tránh ghi đè.")
+        self.skip_existing_images_checkbox.setChecked(True)
+        scroll_widget.addWidget(self.skip_existing_images_checkbox)
         
         # Test Buttons
         test_ai_button = QPushButton("🔌 Test AI Connections")
@@ -424,6 +517,54 @@ class ConfigDialog(QDialog):
                 
                 rate_limit_pause = self.existing_config.get("rate_limit_pause_duration", 60)
                 self.rate_limit_pause_input.setText(str(rate_limit_pause))
+
+                # ✨ Load v5.0 Image Generation Mode
+                mode = self.existing_config.get("image_generation_mode", "search")
+                index = self.mode_combo.findData(mode)
+                if index >= 0:
+                    self.mode_combo.setCurrentIndex(index)
+                
+                # ✨ Load v5.0 GIF providers
+                klipy_key = self.existing_config.get("klipy_app_key", "")
+                self.klipy_input.setText(klipy_key)
+                giphy_key = self.existing_config.get("giphy_api_key", "")
+                self.giphy_input.setText(giphy_key)
+                tenor_key = self.existing_config.get("tenor_api_key", "")
+                self.tenor_input.setText(tenor_key)
+                iconscout_token = self.existing_config.get("iconscout_api_token", "")
+                self.iconscout_input.setText(iconscout_token)
+                
+                # ✨ Load v5.0 Imagen AI Settings
+                enable_imagen = self.existing_config.get("imagen_enabled", False)
+                self.enable_imagen_checkbox.setChecked(enable_imagen)
+                
+                imagen_key = self.existing_config.get("imagen_api_key", "")
+                self.imagen_api_key_input.setText(imagen_key)
+                
+                enable_gemini_desc = self.existing_config.get("enable_gemini_image_description", True)
+                self.enable_gemini_desc_checkbox.setChecked(enable_gemini_desc)
+                
+                gemini_desc_key = self.existing_config.get("gemini_image_description_api_key", "")
+                self.gemini_desc_input.setText(gemini_desc_key)
+                
+                gemini_desc_backup1 = self.existing_config.get("gemini_image_description_api_key_backup_1", "")
+                self.gemini_desc_backup1_input.setText(gemini_desc_backup1)
+                
+                gemini_desc_backup2 = self.existing_config.get("gemini_image_description_api_key_backup_2", "")
+                self.gemini_desc_backup2_input.setText(gemini_desc_backup2)
+                
+                style = self.existing_config.get("imagen_default_style", "photorealistic")
+                self.imagen_style_combo.setCurrentText(style)
+                
+                size = self.existing_config.get("imagen_default_size", "1024x1024")
+                self.imagen_size_combo.setCurrentText(size)
+                
+                imagen_fallback = self.existing_config.get("imagen_fallback_to_search_providers", True)
+                self.imagen_fallback_checkbox.setChecked(imagen_fallback)
+
+                # ✨ Load v5.1 skip_existing_images
+                skip_existing = self.existing_config.get("skip_existing_images", True)
+                self.skip_existing_images_checkbox.setChecked(skip_existing)
         except Exception as e:
             logger.warning(f"Error loading config: {e}")
     
@@ -439,13 +580,10 @@ class ConfigDialog(QDialog):
         if not groq_key and not gemini_key and not use_ollama:
             raise ValueError("Vui lòng cấu hình ít nhất một AI provider (Groq, Gemini, hoặc Ollama)")
         
-        # Image providers
+        # Image providers (Optional check as free ones are always available)
         pexels_key = self.pexels_input.text().strip()
         unsplash_key = self.unsplash_input.text().strip()
         europeana_key = self.europeana_input.text().strip()  # ✨ NEW v4.2
-        
-        if not (pexels_key or unsplash_key or europeana_key):
-            raise ValueError("Vui lòng cấu hình ít nhất một Image Provider (Pexels, Unsplash, hoặc Europeana)")
         
         # 🆕 v4.4: Get 7 Gemini Eval API keys
         enable_ai_eval = self.enable_ai_eval_checkbox.isChecked()
@@ -461,6 +599,26 @@ class ConfigDialog(QDialog):
         except ValueError:
             rate_limit_pause = 60
         
+        # ✨ NEW v5.0 settings
+        mode = self.mode_combo.currentData() or "search"
+        klipy_key = self.klipy_input.text().strip()
+        giphy_key = self.giphy_input.text().strip()
+        tenor_key = self.tenor_input.text().strip()
+        iconscout_token = self.iconscout_input.text().strip()
+        
+        enable_imagen = self.enable_imagen_checkbox.isChecked()
+        imagen_key = self.imagen_api_key_input.text().strip()
+        enable_gemini_desc = self.enable_gemini_desc_checkbox.isChecked()
+        gemini_desc_key = self.gemini_desc_input.text().strip()
+        gemini_desc_backup1 = self.gemini_desc_backup1_input.text().strip()
+        gemini_desc_backup2 = self.gemini_desc_backup2_input.text().strip()
+        style = self.imagen_style_combo.currentText()
+        size = self.imagen_size_combo.currentText()
+        imagen_fallback = self.imagen_fallback_checkbox.isChecked()
+        
+        # ✨ NEW v5.1 skip_existing_images
+        skip_existing = self.skip_existing_images_checkbox.isChecked()
+
         return {
             "groq_api_key": groq_key,
             "gemini_api_key": gemini_key,
@@ -482,7 +640,26 @@ class ConfigDialog(QDialog):
             "europeana_api_key": europeana_key,  # ✨ NEW v4.2
             "enable_rate_limit_protection": enable_rate_limit,  # ✨ NEW v4.2
             "rate_limit_pause_duration": rate_limit_pause,  # ✨ NEW v4.2
-            "image_generation_mode": "search"
+            
+            # ✨ NEW v5.0
+            "image_generation_mode": mode,
+            "klipy_app_key": klipy_key,
+            "giphy_api_key": giphy_key,
+            "tenor_api_key": tenor_key,
+            "iconscout_api_token": iconscout_token,
+            
+            "imagen_enabled": enable_imagen,
+            "imagen_api_key": imagen_key,
+            "enable_gemini_image_description": enable_gemini_desc,
+            "gemini_image_description_api_key": gemini_desc_key,
+            "gemini_image_description_api_key_backup_1": gemini_desc_backup1,
+            "gemini_image_description_api_key_backup_2": gemini_desc_backup2,
+            "imagen_default_style": style,
+            "imagen_default_size": size,
+            "imagen_fallback_to_search_providers": imagen_fallback,
+            
+            # ✨ NEW v5.1 skip_existing_images
+            "skip_existing_images": skip_existing
         }
     
     def test_connection(self):
@@ -744,6 +921,7 @@ class ProgressDialog(QDialog):
         self.total_cards = total_cards
         self.current_card = 0
         self.successful = 0
+        self.skipped = 0
         self.failed = 0
         self.is_cancelled = False
         self.init_ui()
@@ -804,9 +982,13 @@ class ProgressDialog(QDialog):
         stats_layout = QHBoxLayout()
         self.success_label = QLabel("✓ Thành công: 0")
         self.success_label.setStyleSheet("color: green; font-weight: bold;")
+        self.skipped_label = QLabel("ℹ Bỏ qua: 0")
+        self.skipped_label.setStyleSheet("color: blue; font-weight: bold;")
         self.failed_label = QLabel("✗ Thất bại: 0")
         self.failed_label.setStyleSheet("color: red; font-weight: bold;")
         stats_layout.addWidget(self.success_label)
+        stats_layout.addStretch()
+        stats_layout.addWidget(self.skipped_label)
         stats_layout.addStretch()
         stats_layout.addWidget(self.failed_label)
         layout.addLayout(stats_layout)
@@ -835,11 +1017,13 @@ class ProgressDialog(QDialog):
         from aqt.qt import QApplication
         QApplication.processEvents()
     
-    def update_stats(self, successful: int, failed: int):
+    def update_stats(self, successful: int, skipped: int, failed: int):
         """Cập nhật thống kê"""
         self.successful = successful
+        self.skipped = skipped
         self.failed = failed
         self.success_label.setText(f"✓ Thành công: {successful}")
+        self.skipped_label.setText(f"ℹ Bỏ qua: {skipped}")
         self.failed_label.setText(f"✗ Thất bại: {failed}")
     
     def cancel(self):
@@ -848,7 +1032,7 @@ class ProgressDialog(QDialog):
         self.cancel_button.setEnabled(False)
         self.cancel_button.setText("⏳ Đang dừng...")
     
-    def finish(self, success_count: int, fail_count: int):
+    def finish(self, success_count: int, skipped_count: int, fail_count: int):
         """Hoàn thành"""
         self.progress_bar.setValue(self.total_cards)
         self.progress_bar.setFormat("100%")
@@ -856,7 +1040,7 @@ class ProgressDialog(QDialog):
         self.cancel_button.setText("🎉 Đóng")
         self.cancel_button.clicked.disconnect()
         self.cancel_button.clicked.connect(self.accept)
-        self.update_stats(success_count, fail_count)
+        self.update_stats(success_count, skipped_count, fail_count)
 
 
 def get_note_data(note) -> tuple:

@@ -107,57 +107,126 @@ class AddImageTask(ProcessingTask):
             # 2. Kiểm tra xem đã có ảnh không
             current_image = note[self.image_field] if self.image_field in note else ""
             if current_image and "<img" in current_image:
-                logger.info(f"📌 Image already exists for '{vocabulary}'")
-                return False, "Đã có ảnh"
+                skip_existing = config_manager.get("skip_existing_images", True)
+                if skip_existing:
+                    logger.info(f"📌 Image already exists for '{vocabulary}', skipping...")
+                    return "skipped", "Đã có ảnh"
+                else:
+                    logger.info(f"📌 Image already exists for '{vocabulary}', but skip_existing_images is disabled. Overwriting...")
             
-            # 3. Gọi AI để lấy URL ảnh (cùng với examples)
-            logger.info(f"📌 Calling AI for '{vocabulary}'...")
-            image_url = self.ai_provider.get_image_url(vocabulary, definition, examples)
+            generation_mode = config_manager.get("image_generation_mode", "search")
+            logger.info(f"📌 Image generation mode: {generation_mode}")
             
-            if not image_url:
-                logger.warning(f"📌 AI returned no image URL for '{vocabulary}'")
-                return False, "AI không tìm được ảnh"
+            success = False
+            message = ""
             
-            logger.info(f"📌 Got image URL: {image_url[:80]}...")
+            if generation_mode == "generate":
+                # AI generation mode using Imagen
+                logger.info(f"📌 Generating image using AI for '{vocabulary}'...")
+                try:
+                    images, provider_name, metadata = self.ai_provider.generate_image_with_imagen(
+                        vocabulary=vocabulary,
+                        definition=definition,
+                        examples=examples
+                    )
+                    if images and len(images) > 0:
+                        image_data = images[0]
+                        filename = self.image_handler.get_image_filename(vocabulary, image_data)
+                        saved_filename = self.image_handler.save_image_to_anki(image_data, filename)
+                        success = self.image_handler.insert_image_to_note(note, saved_filename, self.image_field)
+                        if success:
+                            message = f"Tạo ảnh AI thành công: {saved_filename}"
+                        else:
+                            message = "Không chèn được ảnh vào note (đã có ảnh)"
+                    else:
+                        message = "AI không tạo được ảnh (không có dữ liệu trả về)"
+                except Exception as e:
+                    logger.error(f"Imagen generation error: {e}")
+                    message = f"Lỗi tạo ảnh AI: {e}"
             
-            # 4. Xử lý ảnh (retry fallback URLs if download fails)
-            logger.debug(f"📌 Processing image for '{vocabulary}'...")
-            success, message = self.image_handler.process_image(
-                image_url, note, vocabulary, self.image_field
-            )
-            
-            # 🚀 CRITICAL FIX v5.1: Parallel fallback retry instead of blocking
-            if not success and "Download" in message:
-                fallback_urls = self.ai_provider.get_fallback_image_urls()
-                if fallback_urls:
-                    logger.info(f"📌 Primary URL failed, trying {len(fallback_urls)} fallback URLs in parallel...")
+            elif generation_mode == "smart":
+                # Smart mode: prefer generated, fallback to search
+                logger.info(f"📌 Smart image selection for '{vocabulary}'...")
+                try:
+                    result, source = self.ai_provider.generate_image_smart(
+                        vocabulary=vocabulary,
+                        definition=definition,
+                        examples=examples,
+                        prefer_generated=True
+                    )
                     
-                    def try_fallback_url(url):
-                        """Try to download fallback URL"""
-                        try:
-                            return self.image_handler.process_image(
-                                url, note, vocabulary, self.image_field
+                    if source == "Imagen" and isinstance(result, bytes):
+                        # Generated image bytes
+                        filename = self.image_handler.get_image_filename(vocabulary, result)
+                        saved_filename = self.image_handler.save_image_to_anki(result, filename)
+                        success = self.image_handler.insert_image_to_note(note, saved_filename, self.image_field)
+                        if success:
+                            message = f"Tạo ảnh AI thành công (Smart): {saved_filename}"
+                        else:
+                            message = "Không chèn được ảnh vào note (đã có ảnh)"
+                    else:
+                        # Search-based image URL
+                        image_url = result
+                        if image_url:
+                            logger.info(f"📌 Got search image URL (Smart): {image_url[:80]}...")
+                            success, message = self.image_handler.process_image(
+                                image_url, note, vocabulary, self.image_field
                             )
-                        except Exception as e:
-                            return False, str(e)
-                    
-                    # Parallel retry: first successful result wins
-                    with ThreadPoolExecutor(max_workers=3) as executor:
-                        futures = {
-                            executor.submit(try_fallback_url, url): url 
-                            for url in fallback_urls
-                        }
+                        else:
+                            message = "Smart search không tìm được ảnh"
+                except Exception as e:
+                    logger.error(f"Smart selection error: {e}")
+                    message = f"Lỗi chọn ảnh thông minh: {e}"
+            
+            else:
+                # Default traditional search mode
+                logger.info(f"📌 Searching image for '{vocabulary}'...")
+                image_url = self.ai_provider.get_image_url(vocabulary, definition, examples)
+                
+                if not image_url:
+                    logger.warning(f"📌 AI returned no image URL for '{vocabulary}'")
+                    return False, "AI không tìm được ảnh"
+                
+                logger.info(f"📌 Got image URL: {image_url[:80]}...")
+                
+                # 4. Xử lý ảnh (retry fallback URLs if download fails)
+                logger.debug(f"📌 Processing image for '{vocabulary}'...")
+                success, message = self.image_handler.process_image(
+                    image_url, note, vocabulary, self.image_field
+                )
+                
+                # 🚀 CRITICAL FIX v5.1: Parallel fallback retry instead of blocking
+                if not success and "Download" in message:
+                    fallback_urls = self.ai_provider.get_fallback_image_urls()
+                    if fallback_urls:
+                        logger.info(f"📌 Primary URL failed, trying {len(fallback_urls)} fallback URLs in parallel...")
                         
-                        for future in as_completed(futures, timeout=24):  # 24s timeout for all
+                        def try_fallback_url(url):
+                            """Try to download fallback URL"""
                             try:
-                                result_success, result_msg = future.result()
-                                if result_success:
-                                    success, message = True, result_msg
-                                    logger.info(f"✅ Fallback URL succeeded: {futures[future][:80]}")
-                                    break  # First success wins
+                                return self.image_handler.process_image(
+                                    url, note, vocabulary, self.image_field
+                                )
                             except Exception as e:
-                                logger.debug(f"Fallback URL failed: {str(e)}")
-                                pass
+                                return False, str(e)
+                        
+                        # Parallel retry: first successful result wins
+                        with ThreadPoolExecutor(max_workers=3) as executor:
+                            futures = {
+                                executor.submit(try_fallback_url, url): url 
+                                for url in fallback_urls
+                            }
+                            
+                            for future in as_completed(futures, timeout=24):  # 24s timeout for all
+                                try:
+                                    result_success, result_msg = future.result()
+                                    if result_success:
+                                        success, message = True, result_msg
+                                        logger.info(f"✅ Fallback URL succeeded: {futures[future][:80]}")
+                                        break  # First success wins
+                                except Exception as e:
+                                    logger.debug(f"Fallback URL failed: {str(e)}")
+                                    pass
             
             logger.info(f"📌 Image processing result: success={success}, msg={message}")
             
@@ -220,26 +289,8 @@ def on_browser_menu_add_images(browser: Browser):
             if config_dialog.exec() == QDialog.DialogCode.Accepted:
                 try:
                     config = config_dialog.get_config()
-                    config_manager.set("groq_api_key", config.get("groq_api_key", ""))
-                    config_manager.set("gemini_api_key", config.get("gemini_api_key", ""))
-                    config_manager.set("gemini_backup_api_key", config.get("gemini_backup_api_key", ""))  # v4.0
-                    config_manager.set("gemini_keyword_api_key_backup", config.get("gemini_keyword_api_key_backup", ""))  # ✨ NEW v4.2
-                    # 🆕 v4.4: Set 7 Gemini Image Evaluator API keys
-                    for i in range(1, 8):
-                        config_manager.set(f"gemini_eval_api_key_{i}", config.get(f"gemini_eval_api_key_{i}", ""))
-                    config_manager.set("enable_ai_evaluation", config.get("enable_ai_evaluation", True))  # 🆕 v4.4
-                    config_manager.set("unsplash_api_key", config.get("unsplash_api_key", ""))
-                    config_manager.set("pixabay_api_key", config.get("pixabay_api_key", ""))
-                    config_manager.set("pexels_api_key", config.get("pexels_api_key", ""))
-                    config_manager.set("google_api_key", config.get("google_api_key", ""))  # v4.0
-                    config_manager.set("google_cx", config.get("google_cx", ""))  # v4.0
-                    config_manager.set("flickr_api_key", config.get("flickr_api_key", ""))
-                    config_manager.set("europeana_api_key", config.get("europeana_api_key", ""))
-                    config_manager.set("noun_project_api_key", config.get("noun_project_api_key", ""))
-                    config_manager.set("noun_project_api_secret", config.get("noun_project_api_secret", ""))
-                    config_manager.set("openverse_api_token", config.get("openverse_api_token", ""))
-                    config_manager.set("enable_ai_provider_routing", config.get("enable_ai_provider_routing", True))
-                    config_manager.set("enable_rate_limit_protection", config.get("enable_rate_limit_protection", True))
+                    for key, val in config.items():
+                        config_manager.set(key, val)
                 except ValueError as e:
                     browser_menu_manager.show_error("Lỗi cấu hình", str(e))
                     return
@@ -383,6 +434,7 @@ Tiếp tục?"""
     )
     
     successful_count = 0
+    skipped_count = 0
     failed_count = 0
     
     # ✨ OPTIMIZE: Batch UI updates (reduce main thread thrashing)
@@ -407,7 +459,7 @@ Tiếp tục?"""
                     detail_msg = parts[1] if len(parts) > 1 else ""
                     
                     progress_dialog.update_progress(current, total, status_msg, detail_msg)
-                    progress_dialog.update_stats(successful_count, failed_count)
+                    progress_dialog.update_stats(successful_count, skipped_count, failed_count)
             
             mw.taskman.run_on_main(_update_ui)
     
@@ -416,25 +468,29 @@ Tiếp tục?"""
         results = result.get("results", [])
         errors = result.get("errors", [])
         
-        # Count successful operations (results is list of tuples: (success, message))
-        successful = [r for r in results if isinstance(r, tuple) and r[0]]
+        # Count successful operations: results are (True, msg), ("skipped", msg), or (False, msg)
+        successful = [r for r in results if isinstance(r, tuple) and r[0] is True]
+        # Count skipped: cards that already had images
+        skipped_results = [r for r in results if isinstance(r, tuple) and r[0] == "skipped"]
         # Count failures: both exception errors AND notes that returned (False, message)
-        failed_results = [r for r in results if isinstance(r, tuple) and not r[0]]
+        failed_results = [r for r in results if isinstance(r, tuple) and r[0] is False]
         failed_errors = [e for e in errors if e]
         all_failures = [r[1] for r in failed_results] + failed_errors
         
-        nonlocal successful_count, failed_count
+        nonlocal successful_count, skipped_count, failed_count
         successful_count = len(successful)
+        skipped_count = len(skipped_results)
         failed_count = len(all_failures)
         
         # Cập nhật progress dialog hoàn thành
         def _finish_ui():
-            progress_dialog.finish(successful_count, failed_count)
+            progress_dialog.finish(successful_count, skipped_count, failed_count)
             
             # Hiển thị summary
             summary = f"""✅ Hoàn thành!
 
 Thành công: {successful_count}
+ℹ Bỏ qua (đã có ảnh): {skipped_count}
 Thất bại: {failed_count}"""
             
             if all_failures:
@@ -501,33 +557,8 @@ def open_config_dialog():
         try:
             config = config_dialog.get_config()
             logger.debug(f"[open_config_dialog] Saving config")
-            # Lưu tất cả config values (v4.2)
-            config_manager.set("groq_api_key", config.get("groq_api_key", ""))
-            config_manager.set("gemini_api_key", config.get("gemini_api_key", ""))
-            config_manager.set("gemini_backup_api_key", config.get("gemini_backup_api_key", ""))  # v4.0
-            config_manager.set("gemini_keyword_api_key_backup", config.get("gemini_keyword_api_key_backup", ""))  # ✨ NEW v4.2
-            # 🆕 v4.4: Set 7 Gemini Image Evaluator API keys
-            for i in range(1, 8):
-                config_manager.set(f"gemini_eval_api_key_{i}", config.get(f"gemini_eval_api_key_{i}", ""))
-            config_manager.set("enable_ai_evaluation", config.get("enable_ai_evaluation", True))  # 🆕 v4.4
-            config_manager.set("use_ollama", config.get("use_ollama", False))
-            config_manager.set("ollama_url", config.get("ollama_url", "http://localhost:11434"))
-            config_manager.set("unsplash_api_key", config.get("unsplash_api_key", ""))
-            config_manager.set("pixabay_api_key", config.get("pixabay_api_key", ""))
-            config_manager.set("pexels_api_key", config.get("pexels_api_key", ""))
-            config_manager.set("wallhaven_api_key", config.get("wallhaven_api_key", ""))
-            config_manager.set("google_api_key", config.get("google_api_key", ""))
-            config_manager.set("google_cx", config.get("google_cx", ""))
-            config_manager.set("flickr_api_key", config.get("flickr_api_key", ""))  # ✨ NEW v4.2
-            config_manager.set("europeana_api_key", config.get("europeana_api_key", ""))
-            config_manager.set("noun_project_api_key", config.get("noun_project_api_key", ""))
-            config_manager.set("noun_project_api_secret", config.get("noun_project_api_secret", ""))
-            config_manager.set("openverse_api_token", config.get("openverse_api_token", ""))
-            config_manager.set("enable_ai_provider_routing", config.get("enable_ai_provider_routing", True))
-            config_manager.set("enable_smart_selection", config.get("enable_smart_selection", True))
-            config_manager.set("enable_rate_limit_protection", config.get("enable_rate_limit_protection", True))
-            config_manager.set("max_concurrent_providers", config.get("max_concurrent_providers", 10))
-            config_manager.set("image_generation_mode", config.get("image_generation_mode", "search"))
+            for key, val in config.items():
+                config_manager.set(key, val)
             
             # Force save config
             config_manager.save_config()
