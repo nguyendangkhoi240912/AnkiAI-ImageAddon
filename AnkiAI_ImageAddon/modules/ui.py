@@ -289,6 +289,12 @@ class ConfigDialog(QDialog):
         self.unsplash_input.setPlaceholderText("Get from: unsplash.com/developers")
         scroll_widget.addWidget(self.unsplash_input)
         
+        scroll_widget.addWidget(QLabel("Pixabay API Key (⭐ Khuyến nghị - Miễn phí, chất lượng cao):"))
+        self.pixabay_input = QLineEdit()
+        self.pixabay_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.pixabay_input.setPlaceholderText("Get from: pixabay.com/api")
+        scroll_widget.addWidget(self.pixabay_input)
+        
         scroll_widget.addWidget(QLabel("Europeana API Key (tuỳ chọn - v4.2):"))
         self.europeana_input = QLineEdit()
         self.europeana_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -497,6 +503,10 @@ class ConfigDialog(QDialog):
                 if pexels_key:
                     self.pexels_input.setText(pexels_key)
                 
+                pixabay_key = self.existing_config.get("pixabay_api_key", "")
+                if pixabay_key:
+                    self.pixabay_input.setText(pixabay_key)
+                
                 # ✨ Load new provider keys (v4.2)
                 europeana_key = self.existing_config.get("europeana_api_key", "")
                 if europeana_key:
@@ -583,6 +593,7 @@ class ConfigDialog(QDialog):
         # Image providers (Optional check as free ones are always available)
         pexels_key = self.pexels_input.text().strip()
         unsplash_key = self.unsplash_input.text().strip()
+        pixabay_key = self.pixabay_input.text().strip()
         europeana_key = self.europeana_input.text().strip()  # ✨ NEW v4.2
         
         # 🆕 v4.4: Get 7 Gemini Eval API keys
@@ -637,6 +648,7 @@ class ConfigDialog(QDialog):
             "ollama_url": self.ollama_url_input.text().strip(),
             "unsplash_api_key": unsplash_key,
             "pexels_api_key": pexels_key,
+            "pixabay_api_key": pixabay_key,
             "europeana_api_key": europeana_key,  # ✨ NEW v4.2
             "enable_rate_limit_protection": enable_rate_limit,  # ✨ NEW v4.2
             "rate_limit_pause_duration": rate_limit_pause,  # ✨ NEW v4.2
@@ -739,6 +751,7 @@ class ConfigDialog(QDialog):
         """Test kết nối Image Providers với giao diện đẹp"""
         pexels_key = self.pexels_input.text().strip()
         unsplash_key = self.unsplash_input.text().strip()
+        pixabay_key = self.pixabay_input.text().strip()
         
         results = []
         
@@ -777,6 +790,23 @@ class ConfigDialog(QDialog):
                 results.append(("Unsplash", str(e), False, "Connection error"))
         else:
             results.append(("Unsplash", "No API key", None, "Optional provider"))
+        
+        # Test Pixabay
+        if pixabay_key:
+            try:
+                response = requests.get(
+                    "https://pixabay.com/api/",
+                    params={"key": pixabay_key, "q": "test", "per_page": 3},
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    results.append(("Pixabay", "OK", True, "High quality / Animated images"))
+                else:
+                    results.append(("Pixabay", f"Error {response.status_code}", False, "API error"))
+            except Exception as e:
+                results.append(("Pixabay", str(e), False, "Connection error"))
+        else:
+            results.append(("Pixabay", "No API key", None, "Optional provider"))
         
         # Test Openverse (no API key needed)
         try:
