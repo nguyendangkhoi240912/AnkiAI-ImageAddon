@@ -1,11 +1,12 @@
 {
     "name": "AnkiAI Image Add-on",
     "package": "AnkiAI_ImageAddon",
-    "homepage": "https://github.com/yourusername/AnkiAI-ImageAddon",
+    "homepage": "https://github.com/nguyendangkhoi240912/AnkiAI-ImageAddon",
     "author": "AnkiAI Team",
-    "description": "Add-on tự động tìm kiếm và thêm ảnh minh họa vào thẻ Anki bằng 20+ image providers (gồm 5 nguồn GIF) + tạo ảnh bằng AI (Imagen 4 Ultra). v5.0: 5 GIF providers, AI image generation, adaptive delays, global session pooling!",
-    "human_description": "Tự động hóa thêm ảnh vào thẻ Anki bằng AI. v5.0: 20+ image/GIF providers, tạo ảnh AI bằng Imagen 4 Ultra, Gemini image description, adaptive delays, connection pooling, thread-safe caching, hoàn toàn free!",
-    "version": "5.0",
+    "description": "Tự động thêm ảnh/GIF vào thẻ Anki: 20+ nguồn tìm kiếm, Imagen, preset theo note type, batch pause/resume.",
+    "human_description": "Tìm hoặc tạo ảnh minh họa cho flashcard bằng AI và nhiều nguồn ảnh miễn phí. Hỗ trợ preset field theo note type, giới hạn batch, và tiếp tục khi dừng giữa chừng.",
+    "version": "5.1.0",
+    "mod": 1748736000,
     "anki": "25.09.2",
     "conflicts": [],
     "conf_version": 1

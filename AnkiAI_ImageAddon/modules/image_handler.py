@@ -391,6 +391,36 @@ class ImageHandler:
         
         except Exception as e:
             raise ImageError(f"Error saving image to Anki: {str(e)}")
+
+    def remove_media_file(self, filename: str) -> None:
+        """Remove unused media (e.g. after failed insert)."""
+        if not filename:
+            return
+        try:
+            self.col.media.trash_files([filename])
+            logger.info(f"🗑️ Removed orphan media: {filename}")
+        except Exception as e:
+            logger.warning(f"Could not remove media {filename}: {e}")
+
+    def save_and_insert(
+        self,
+        note,
+        image_data: bytes,
+        vocabulary: str,
+        image_field_name: str,
+        *,
+        overwrite: bool = False,
+    ) -> Tuple[ProcessStatus, str]:
+        """Save to media then insert; rollback media if insert does not modify note."""
+        filename = self.get_image_filename(vocabulary, image_data)
+        saved_filename = self.save_image_to_anki(image_data, filename)
+        inserted = self.insert_image_to_note(
+            note, saved_filename, image_field_name, overwrite=overwrite
+        )
+        if inserted:
+            return True, saved_filename
+        self.remove_media_file(saved_filename)
+        return "skipped", "Đã có ảnh (không ghi đè)"
     
     def insert_image_to_note(
         self,

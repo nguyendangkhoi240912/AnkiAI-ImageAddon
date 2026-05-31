@@ -197,6 +197,12 @@ class AIImageProvider:
 
         self._result_url_cache: Dict[str, Tuple[str, float]] = {}
         self._last_candidate_urls: List[str] = []
+        self.prefer_fewer_api_calls = (
+            provider_config.get("prefer_fewer_api_calls", True) if provider_config else True
+        )
+        self.max_eval_candidates = int(
+            provider_config.get("max_eval_candidates", 2) if provider_config else 2
+        )
 
         # Imagen support (v5.0)
         self.imagen_enabled = provider_config.get("imagen_enabled", False) if provider_config else False
@@ -258,7 +264,14 @@ class AIImageProvider:
             raise APIError("Image selection disabled")
 
         try:
-            top_n = 5 if (self.enable_ai_evaluation and self.image_evaluator) else 1
+            if self.enable_ai_evaluation and self.image_evaluator:
+                top_n = (
+                    min(self.max_eval_candidates, 2)
+                    if self.prefer_fewer_api_calls
+                    else min(self.max_eval_candidates, 5)
+                )
+            else:
+                top_n = 1
 
             # Phase 1: domain-specific providers only (avoid general stock photos)
             domains_primary = resolve_domains(

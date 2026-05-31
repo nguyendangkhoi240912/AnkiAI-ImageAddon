@@ -1,12 +1,12 @@
 # 🎨 AnkiAI ImageAddon - Tự động thêm ảnh & GIF bằng AI
 
-**Version 5.0** - Professional Animated Image Support! 🎬✨
+**Version 5.1** — Preset theo note type, batch pause/resume, tối ưu API
 
 ## 🌟 AnkiAI là gì?
 
 **AnkiAI ImageAddon** là một Anki add-on mạnh mẽ giúp bạn:
 
-- ✨ **Tự động tạo ảnh** bằng DALL-E 3 (AI vẽ ảnh từ cách tả)
+- ✨ **Tự động tạo ảnh** bằng Google **Imagen** (AI vẽ từ từ vựng + định nghĩa)
 - 🔍 **Tìm kiếm ảnh tĩnh** từ 15+ nguồn (Pexels, Unsplash, Pixabay, v.v.)
 - 🎬 **Tìm kiếm ảnh động** từ 5 nền tảng GIF chuyên nghiệp
 - 🤖 **AI-powered**: ChatGPT/Gemini tạo keyword tự động từ định nghĩa
@@ -34,7 +34,7 @@
 - **Keyword Generation**: ChatGPT/Gemini tạo query từ definition
 - **Domain Routing**: AI chọn provider phù hợp (medical, chemistry, biology, etc.)
 - **Smart Selection**: Đánh giá & chọn ảnh tốt nhất từ multiple providers
-- **Image Generation**: DALL-E 3 vẽ ảnh độc quyền
+- **Image Generation**: Imagen (tùy chọn) + fallback tìm kiếm 20+ nguồn
 
 ### ⚙️ Performance & Reliability
 - **Concurrent Requests**: 10 providers chạy song song
@@ -71,11 +71,13 @@ Tùy chọn: Chỉ cần ít nhất **1 API key** để bắt đầu. Thêm nhi�
   1. Đăng ký → Tìm API Key
   2. Copy vào config
 
-**Option 2: AI-Generated Images (Chất lượng cao)**
-- **OpenAI** (DALL-E 3): https://platform.openai.com/api-keys
-  1. Đăng ký → Create API Key
-  2. Copy vào config
-  3. *Chi phí: ~$0.08/ảnh*
+**Option 2: AI-Generated Images (Imagen)**
+- **Google AI Studio** (Gemini + Imagen): https://aistudio.google.com/apikey
+  1. Bật `imagen_enabled` trong config
+  2. Thêm `imagen_api_key` và key mô tả ảnh (Gemini)
+  3. Chọn mode `generate` hoặc `smart`
+
+**Cập nhật addon:** clone/pull từ [GitHub](https://github.com/nguyendangkhoi240912/AnkiAI-ImageAddon) hoặc cài file `.ankiaddon` (xem `ANKIWEB.md` khi đăng AnkiWeb).
 
 **Option 3: Animated Images - GIF (Mới!)**
 - **KLIPY** (Miễn phí): https://www.klipy.io/developers

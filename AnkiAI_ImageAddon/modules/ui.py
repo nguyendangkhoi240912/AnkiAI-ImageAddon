@@ -5,8 +5,23 @@ Giai đoạn 1: Tạo menu trong Browser và trích xuất dữ liệu thẻ
 
 from aqt import mw
 from aqt.browser import Browser
-from aqt.qt import QMessageBox, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QWidget, QProgressBar, QLineEdit, QTextBrowser
-from typing import List, Optional, Callable
+from aqt.qt import (
+    QMessageBox,
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QComboBox,
+    QPushButton,
+    QWidget,
+    QProgressBar,
+    QLineEdit,
+    QTextBrowser,
+    QCheckBox,
+    QSpinBox,
+)
+from typing import List, Optional, Callable, Dict, Any
+from .ui_theme import apply_dialog_theme
 import functools
 import logging
 import requests
@@ -23,7 +38,12 @@ class BrowserMenuManager:
         """Khởi tạo BrowserMenuManager"""
         self.browser: Optional[Browser] = None
     
-    def setup_browser_menu(self, browser: Browser, callback_add_images: callable):
+    def setup_browser_menu(
+        self,
+        browser: Browser,
+        callback_add_images: callable,
+        callback_resume_batch: Optional[callable] = None,
+    ):
         """
         Hook vào Browser để thêm context menu
         
@@ -42,15 +62,23 @@ class BrowserMenuManager:
         # Tạo action cho menu
         try:
             # Phương pháp mới (Anki 24.04+)
-            action = browser.form.menu_Cards.addAction("AnkiAI: Tự động thêm ảnh bằng AI")
+            action = browser.form.menu_Cards.addAction("AnkiAI: Tự động thêm ảnh")
             action.triggered.connect(lambda: callback_add_images(browser))
+            if callback_resume_batch:
+                resume = browser.form.menu_Cards.addAction("AnkiAI: Tiếp tục batch đã dừng")
+                resume.triggered.connect(lambda: callback_resume_batch(browser))
             logger.info("Menu added to Cards menu")
         except Exception as e1:
             logger.warning(f"Failed to add to Cards menu: {e1}")
             # Thử menu_Notes (Anki 25+)
             try:
-                action = browser.form.menu_Notes.addAction("AnkiAI: Tự động thêm ảnh bằng AI")
+                action = browser.form.menu_Notes.addAction("AnkiAI: Tự động thêm ảnh")
                 action.triggered.connect(lambda: callback_add_images(browser))
+                if callback_resume_batch:
+                    resume = browser.form.menu_Notes.addAction(
+                        "AnkiAI: Tiếp tục batch đã dừng"
+                    )
+                    resume.triggered.connect(lambda: callback_resume_batch(browser))
                 logger.info("Menu added to Notes menu")
             except Exception as e2:
                 logger.warning(f"Failed to add to Notes menu: {e2}")
@@ -108,10 +136,86 @@ class BrowserMenuManager:
         return reply == QMessageBox.StandardButton.Yes
 
 
+class BatchOptionsDialog(QDialog):
+    """Giới hạn số thẻ / tiếp tục batch trước."""
+
+    def __init__(
+        self,
+        selected_count: int,
+        default_max: int = 100,
+        pending_count: int = 0,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.use_pending = False
+        self.max_notes = selected_count
+        apply_dialog_theme(self)
+        self.setWindowTitle("AnkiAI — Tùy chọn batch")
+        self.setMinimumWidth(420)
+
+        layout = QVBoxLayout()
+        title = QLabel(f"Đã chọn {selected_count} thẻ")
+        title.setProperty("heading", True)
+        layout.addWidget(title)
+
+        hint = QLabel(
+            "Giới hạn mỗi lần chạy giúp addon mượt hơn và tránh rate limit API."
+        )
+        hint.setProperty("muted", True)
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Tối đa mỗi lần (0 = tất cả):"))
+        self.max_spin = QSpinBox()
+        self.max_spin.setRange(0, max(selected_count, 1))
+        self.max_spin.setValue(
+            min(default_max, selected_count) if default_max > 0 else selected_count
+        )
+        row.addWidget(self.max_spin)
+        layout.addLayout(row)
+
+        self.pending_btn = None
+        if pending_count > 0:
+            self.pending_btn = QPushButton(
+                f"Tiếp tục batch đã dừng ({pending_count} thẻ)"
+            )
+            self.pending_btn.setProperty("primary", True)
+            self.pending_btn.clicked.connect(self._accept_pending)
+            layout.addWidget(self.pending_btn)
+
+        buttons = QHBoxLayout()
+        ok = QPushButton("Tiếp tục")
+        ok.setProperty("primary", True)
+        cancel = QPushButton("Hủy")
+        ok.clicked.connect(self._accept_normal)
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(cancel)
+        buttons.addStretch()
+        buttons.addWidget(ok)
+        layout.addLayout(buttons)
+        self.setLayout(layout)
+
+    def _accept_normal(self):
+        self.use_pending = False
+        self.max_notes = self.max_spin.value()
+        self.accept()
+
+    def _accept_pending(self):
+        self.use_pending = True
+        self.accept()
+
+
 class FieldSelectionDialog(QDialog):
     """Dialog cho người dùng chọn các field"""
     
-    def __init__(self, model_name: str, available_fields: List[str], parent=None):
+    def __init__(
+        self,
+        model_name: str,
+        available_fields: List[str],
+        parent=None,
+        initial: Optional[Dict[str, str]] = None,
+    ):
         """
         Khởi tạo FieldSelectionDialog
         
@@ -126,53 +230,64 @@ class FieldSelectionDialog(QDialog):
         self.selected_definition_field = None
         self.selected_examples_field = None  # ✨ NEW: Examples field
         self.selected_image_field = None
+        self.save_as_preset = False
+        self._initial = initial or {}
         
         self.init_ui(model_name)
     
     def init_ui(self, model_name: str):
         """Tạo giao diện dialog"""
-        self.setWindowTitle(f"Chọn fields - {model_name}")
-        self.setMinimumWidth(400)
+        apply_dialog_theme(self)
+        self.setWindowTitle(f"AnkiAI — Fields · {model_name}")
+        self.setMinimumWidth(440)
         
         layout = QVBoxLayout()
+        head = QLabel(f"Note type: {model_name}")
+        head.setProperty("heading", True)
+        layout.addWidget(head)
         
-        # Chọn field từ vựng
-        layout.addWidget(QLabel("Chọn field Từ vựng:"))
-        vocab_combo = QComboBox()
-        vocab_combo.addItems(self.available_fields)
-        # Thử tìm field mặc định
-        if "Mặt trước" in self.available_fields:
-            vocab_combo.setCurrentText("Mặt trước")
+        def _combo(fields, key, defaults):
+            combo = QComboBox()
+            combo.addItems(fields)
+            val = self._initial.get(key) or ""
+            if val and val in fields:
+                combo.setCurrentText(val)
+            elif defaults in fields:
+                combo.setCurrentText(defaults)
+            return combo
+
+        layout.addWidget(QLabel("Field từ vựng"))
+        vocab_combo = _combo(self.available_fields, "vocabulary_field", "Mặt trước")
         layout.addWidget(vocab_combo)
         
-        # Chọn field định nghĩa
-        layout.addWidget(QLabel("Chọn field Định nghĩa:"))
-        definition_combo = QComboBox()
-        definition_combo.addItems(self.available_fields)
-        if "Định nghĩa" in self.available_fields:
-            definition_combo.setCurrentText("Định nghĩa")
+        layout.addWidget(QLabel("Field định nghĩa"))
+        definition_combo = _combo(self.available_fields, "definition_field", "Định nghĩa")
         layout.addWidget(definition_combo)
         
-        # ✨ NEW: Chọn field Ví dụ
-        layout.addWidget(QLabel("Chọn field Ví dụ (tùy chọn):"))
+        layout.addWidget(QLabel("Field ví dụ (tùy chọn)"))
         examples_combo = QComboBox()
         examples_combo.addItems([""] + self.available_fields)
-        if "Ví dụ" in self.available_fields:
+        ex = self._initial.get("examples_field", "")
+        if ex and ex in self.available_fields:
+            examples_combo.setCurrentText(ex)
+        elif "Ví dụ" in self.available_fields:
             examples_combo.setCurrentText("Ví dụ")
         layout.addWidget(examples_combo)
         
-        # Chọn field ảnh
-        layout.addWidget(QLabel("Chọn field Ảnh:"))
-        image_combo = QComboBox()
-        image_combo.addItems(self.available_fields)
-        if "Ảnh" in self.available_fields:
-            image_combo.setCurrentText("Ảnh")
+        layout.addWidget(QLabel("Field ảnh"))
+        image_combo = _combo(self.available_fields, "image_field", "Ảnh")
         layout.addWidget(image_combo)
+
+        self.remember_checkbox = QCheckBox(
+            "Lưu preset cho note type này (lần sau không hỏi lại)"
+        )
+        self.remember_checkbox.setChecked(True)
+        layout.addWidget(self.remember_checkbox)
         
-        # Nút OK/Cancel
         button_layout = QHBoxLayout()
-        ok_button = QPushButton("OK")
         cancel_button = QPushButton("Hủy")
+        ok_button = QPushButton("Tiếp tục")
+        ok_button.setProperty("primary", True)
         
         ok_button.clicked.connect(lambda: self.accept_with_values(
             vocab_combo.currentText(),
@@ -182,8 +297,9 @@ class FieldSelectionDialog(QDialog):
         ))
         cancel_button.clicked.connect(self.reject)
         
-        button_layout.addWidget(ok_button)
         button_layout.addWidget(cancel_button)
+        button_layout.addStretch()
+        button_layout.addWidget(ok_button)
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
@@ -194,6 +310,7 @@ class FieldSelectionDialog(QDialog):
         self.selected_definition_field = definition_field
         self.selected_examples_field = examples_field
         self.selected_image_field = image_field
+        self.save_as_preset = self.remember_checkbox.isChecked()
         self.accept()
 
 
@@ -211,8 +328,9 @@ class ConfigDialog(QDialog):
     def init_ui(self):
         """Tạo giao diện config"""
         from aqt.qt import QLineEdit, QCheckBox, QScrollArea
-        
-        self.setWindowTitle("AnkiAI v5.0 - Cài đặt (Multi-Gemini + 20+ Image/GIF Providers + AI Image Generation)")
+
+        apply_dialog_theme(self)
+        self.setWindowTitle("AnkiAI v5.1 — Cài đặt")
         self.setMinimumWidth(650)
         self.setMinimumHeight(850)
         
@@ -992,64 +1110,50 @@ class ProgressDialog(QDialog):
     
     def init_ui(self):
         """Tạo giao diện progress"""
-        self.setWindowTitle("🖼️ AnkiAI - Đang Thêm Ảnh")
-        self.setMinimumWidth(500)
-        self.setMinimumHeight(300)
+        apply_dialog_theme(self)
+        self.setWindowTitle("AnkiAI — Đang thêm ảnh")
+        self.setMinimumWidth(520)
+        self.setMinimumHeight(280)
         
         layout = QVBoxLayout()
         
-        # Tiêu đề
-        title_label = QLabel(f"Đang xử lý {self.total_cards} thẻ...")
-        title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        title_label = QLabel(f"Đang xử lý {self.total_cards} thẻ…")
+        title_label.setProperty("heading", True)
         layout.addWidget(title_label)
         
-        # Progress bar chính
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
         self.progress_bar.setMaximum(self.total_cards)
         self.progress_bar.setValue(0)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #cccccc;
-                border-radius: 5px;
-                text-align: center;
-                height: 25px;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-                border-radius: 3px;
-            }
-        """)
         layout.addWidget(self.progress_bar)
         
         # Info layout (card current/total)
         info_layout = QHBoxLayout()
         self.info_label = QLabel("Thẻ: 0/0")
-        self.info_label.setStyleSheet("font-size: 12px;")
+        self.info_label.setProperty("muted", True)
         info_layout.addWidget(self.info_label)
         info_layout.addStretch()
         layout.addLayout(info_layout)
         
         # Status message
-        self.status_label = QLabel("Khởi tạo...")
-        self.status_label.setStyleSheet("color: #666666; font-size: 11px; font-style: italic;")
+        self.status_label = QLabel("Khởi tạo…")
+        self.status_label.setProperty("muted", True)
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
         
         # Detail message
         self.detail_label = QLabel("")
-        self.detail_label.setStyleSheet("color: #333333; font-size: 12px;")
         self.detail_label.setWordWrap(True)
         layout.addWidget(self.detail_label)
         
         # Stats layout
         stats_layout = QHBoxLayout()
-        self.success_label = QLabel("✓ Thành công: 0")
-        self.success_label.setStyleSheet("color: green; font-weight: bold;")
-        self.skipped_label = QLabel("ℹ Bỏ qua: 0")
-        self.skipped_label.setStyleSheet("color: blue; font-weight: bold;")
-        self.failed_label = QLabel("✗ Thất bại: 0")
-        self.failed_label.setStyleSheet("color: red; font-weight: bold;")
+        self.success_label = QLabel("Thành công: 0")
+        self.success_label.setStyleSheet("color: #15803d; font-weight: 600;")
+        self.skipped_label = QLabel("Bỏ qua: 0")
+        self.skipped_label.setStyleSheet("color: #1d4ed8; font-weight: 600;")
+        self.failed_label = QLabel("Thất bại: 0")
+        self.failed_label.setStyleSheet("color: #b91c1c; font-weight: 600;")
         stats_layout.addWidget(self.success_label)
         stats_layout.addStretch()
         stats_layout.addWidget(self.skipped_label)
@@ -1058,11 +1162,16 @@ class ProgressDialog(QDialog):
         layout.addLayout(stats_layout)
         
         # Cancel button
-        self.cancel_button = QPushButton("❌ Hủy Bỏ")
+        self.cancel_button = QPushButton("Dừng batch")
+        self.cancel_button.setProperty("danger", True)
         self.cancel_button.clicked.connect(self.cancel)
         layout.addWidget(self.cancel_button)
         
         self.setLayout(layout)
+        self._on_cancel_callback = None
+
+    def set_cancel_callback(self, callback: Callable[[], None]):
+        self._on_cancel_callback = callback
     
     def update_progress(self, current: int, total: int, status_msg: str, detail_msg: str = ""):
         """Cập nhật progress"""
@@ -1094,14 +1203,18 @@ class ProgressDialog(QDialog):
         """Hủy bỏ"""
         self.is_cancelled = True
         self.cancel_button.setEnabled(False)
-        self.cancel_button.setText("⏳ Đang dừng...")
+        self.cancel_button.setText("Đang dừng…")
+        if self._on_cancel_callback:
+            self._on_cancel_callback()
     
     def finish(self, success_count: int, skipped_count: int, fail_count: int):
         """Hoàn thành"""
         self.progress_bar.setValue(self.total_cards)
         self.progress_bar.setFormat("100%")
-        self.status_label.setText("✅ Hoàn thành!")
-        self.cancel_button.setText("🎉 Đóng")
+        self.status_label.setText("Hoàn thành")
+        self.cancel_button.setText("Đóng")
+        self.cancel_button.setProperty("danger", False)
+        self.cancel_button.setProperty("primary", True)
         self.cancel_button.clicked.disconnect()
         self.cancel_button.clicked.connect(self.accept)
         self.update_stats(success_count, skipped_count, fail_count)
