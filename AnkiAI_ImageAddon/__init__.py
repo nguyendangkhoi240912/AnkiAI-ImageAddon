@@ -44,7 +44,15 @@ logger = _setup_file_logging()
 
 # Import modules
 from .modules.config import get_config_manager
-from .modules.ui import BrowserMenuManager, FieldSelectionDialog, ConfigDialog, ProgressDialog, get_note_data
+from .modules.ui import (
+    BrowserMenuManager,
+    FieldSelectionDialog,
+    ConfigDialog,
+    ProgressDialog,
+    BatchOptionsDialog,
+    get_note_data,
+)
+from .modules.note_presets import get_preset, build_preset
 from .modules.api_handler import AIImageProvider, APIError
 from .modules.image_handler import ImageHandler, ImageError
 from .modules.bg_handler import BackgroundProcessor, ProcessingTask
@@ -84,6 +92,16 @@ class AddImageTask(ProcessingTask):
             return None
         available = list(note.keys())
         return False, f"Field '{self.image_field}' không tồn tại. Có: {available}"
+
+    def _apply_generated_bytes(self, note, image_data: bytes, vocabulary: str, overwrite: bool) -> tuple:
+        status, detail = self.image_handler.save_and_insert(
+            note, image_data, vocabulary, self.image_field, overwrite=overwrite
+        )
+        if status is True:
+            return True, f"Tạo ảnh AI thành công: {detail}"
+        if status == "skipped":
+            return "skipped", detail
+        return False, detail
 
     @staticmethod
     def _finalize_result(success, message: str, vocabulary: str) -> tuple:
@@ -152,20 +170,9 @@ class AddImageTask(ProcessingTask):
                         examples=examples
                     )
                     if images and len(images) > 0:
-                        image_data = images[0]
-                        filename = self.image_handler.get_image_filename(vocabulary, image_data)
-                        saved_filename = self.image_handler.save_image_to_anki(image_data, filename)
-                        inserted = self.image_handler.insert_image_to_note(
-                            note, saved_filename, self.image_field, overwrite=overwrite
+                        success, message = self._apply_generated_bytes(
+                            note, images[0], vocabulary, overwrite
                         )
-                        if inserted:
-                            success = True
-                            message = f"Tạo ảnh AI thành công: {saved_filename}"
-                        else:
-                            # Image already exists - this is "skipped", not failure
-                            success = "skipped"
-                            message = "Đã có ảnh (không ghi đè)"
-                            logger.info(f"📌 Image already exists in field, skipping insertion for '{vocabulary}'")
                     else:
                         success = False
                         message = "AI không tạo được ảnh (không có dữ liệu trả về)"
@@ -186,20 +193,11 @@ class AddImageTask(ProcessingTask):
                     )
                     
                     if source == "Imagen" and isinstance(result, bytes):
-                        # Generated image bytes
-                        filename = self.image_handler.get_image_filename(vocabulary, result)
-                        saved_filename = self.image_handler.save_image_to_anki(result, filename)
-                        inserted = self.image_handler.insert_image_to_note(
-                            note, saved_filename, self.image_field, overwrite=overwrite
+                        success, message = self._apply_generated_bytes(
+                            note, result, vocabulary, overwrite
                         )
-                        if inserted:
-                            success = True
-                            message = f"Tạo ảnh AI thành công (Smart): {saved_filename}"
-                        else:
-                            # Image already exists - this is "skipped", not failure
-                            success = "skipped"
-                            message = "Đã có ảnh (không ghi đè)"
-                            logger.info(f"📌 Image already exists, skipping Imagen insertion for '{vocabulary}'")
+                        if success is True:
+                            message = f"{message} (Smart)"
                     else:
                         # Search-based image URL
                         image_url = result
@@ -284,334 +282,320 @@ class AddImageTask(ProcessingTask):
             return False, f"Lỗi không xác định: {str(e)}"
 
 
-def on_browser_menu_add_images(browser: Browser):
-    """
-    Callback khi người dùng chọn "Tự động thêm ảnh"
-    
-    Quy trình:
-    1. Lấy danh sách thẻ được chọn
-    2. Hiển thị dialog chọn fields
-    3. Hiển thị dialog cấu hình API
-    4. Chạy xử lý background
-    """
-    
-    # Bước 1: Lấy danh sách thẻ được chọn
-    note_ids = browser_menu_manager.get_selected_note_ids(browser)
-    
-    if not note_ids:
-        browser_menu_manager.show_warning(
-            "Cảnh báo",
-            "Vui lòng chọn ít nhất 1 thẻ"
-        )
-        return
-    
-    logger.info(f"[ADDON] Selected {len(note_ids)} notes")
-    
-    # ✨ OPTIMIZE: Single reload + cache all values (not multiple reloads)
-    config_manager.reload()
-    
-    # Bước 2: Kiểm tra API key (Groq hoặc Gemini) - reuse cached values
+def _ensure_ai_provider(browser: Browser) -> bool:
+    """Return True if an AI keyword provider is configured."""
     has_groq = bool(config_manager.get("groq_api_key"))
     has_gemini = bool(config_manager.get("gemini_api_key"))
-    
-    if not has_groq and not has_gemini:
-        reply = browser_menu_manager.show_question(
-            "Cấu hình",
-            "Chưa có AI provider nào được cấu hình (Groq hoặc Gemini).\nBạn muốn cấu hình ngay bây giờ?"
-        )
-        
-        if reply:
-            config_dialog = ConfigDialog(browser, existing_config=config_manager.get_all())
-            if config_dialog.exec() == QDialog.DialogCode.Accepted:
-                try:
-                    config = config_dialog.get_config()
-                    for key, val in config.items():
-                        config_manager.set(key, val)
-                except ValueError as e:
-                    browser_menu_manager.show_error("Lỗi cấu hình", str(e))
-                    return
-            else:
-                return
-        else:
-            return
-    
-    # Bước 3: Lấy note đầu tiên để xác định fields
+    if has_groq or has_gemini:
+        return True
+    reply = browser_menu_manager.show_question(
+        "Cấu hình",
+        "Chưa có AI provider (Groq hoặc Gemini).\nCấu hình ngay?",
+    )
+    if not reply:
+        return False
+    config_dialog = ConfigDialog(browser, existing_config=config_manager.get_all())
+    if config_dialog.exec() != QDialog.DialogCode.Accepted:
+        return False
     try:
-        first_note = mw.col.get_note(note_ids[0])
-        available_fields = list(first_note.keys())
-        logger.info(f"Available fields: {available_fields}")
-    except Exception as e:
-        logger.error(f"Error getting first note: {str(e)}")
-        browser_menu_manager.show_error("Lỗi", f"Không thể lấy note đầu tiên: {str(e)}")
-        return
-    
-    # Bước 4: Hiển thị dialog chọn fields (luôn hiển thị để user có thể chọn)
-    try:
-        vocab_field = config_manager.get("vocabulary_field", "Mặt trước")
-        definition_field = config_manager.get("definition_field", "Định nghĩa")
-        image_field = config_manager.get("image_field", "Ảnh")
-        examples_field = config_manager.get("examples_field", "Ví dụ")  # ✨ Initialize from config
-        
-        logger.info(f"Creating field selection dialog for model: {first_note.note_type()['name']}")
-        
-        # 🔧 FIX: Luôn hiển thị dialog chọn field
-        field_dialog = FieldSelectionDialog(
-            first_note.note_type()["name"],
-            available_fields,
-            browser
-        )
-        
-        logger.info("Showing field selection dialog...")
-        if field_dialog.exec() == QDialog.DialogCode.Accepted:
-            vocab_field = field_dialog.selected_vocab_field
-            definition_field = field_dialog.selected_definition_field
-            examples_field = field_dialog.selected_examples_field  # ✨ NEW
-            image_field = field_dialog.selected_image_field
-            
-            logger.info(f"Fields selected: vocab={vocab_field}, def={definition_field}, ex={examples_field}, img={image_field}")
-            
-            # Lưu vào config
-            config_manager.set("vocabulary_field", vocab_field)
-            config_manager.set("definition_field", definition_field)
-            config_manager.set("examples_field", examples_field)  # ✨ NEW
-            config_manager.set("image_field", image_field)
-        else:
-            logger.info("Field selection dialog cancelled")
-            return
-    except Exception as e:
-        logger.error(f"Error in field selection dialog: {str(e)}")
-        browser_menu_manager.show_error("Lỗi", f"Lỗi khi chọn fields: {str(e)}")
-        return
-    
-    # Bước 5: Chuẩn bị AI provider với tất cả providers (v4.2 - multi-key + 15+ providers)
-    try:
-        # ✨ OPTIMIZE: Use already-reloaded config, don't reload again
-        
-        # ✨ AI Providers (v4.2 - multi-key for Gemini)
-        gemini_key = config_manager.get("gemini_api_key", "")
-        gemini_backup_key = config_manager.get("gemini_backup_api_key", "")  # v4.0
-        gemini_keyword_backup = config_manager.get("gemini_keyword_api_key_backup", "")  # ✨ NEW v4.2
-        groq_key = config_manager.get("groq_api_key", "")
-        use_ollama = config_manager.get("use_ollama", False)
-        ollama_url = config_manager.get("ollama_url", "http://localhost:11434")
-        
-        # 🆕 v4.4: Read 7 Gemini Image Evaluator API keys
-        gemini_eval_api_key_1 = config_manager.get("gemini_eval_api_key_1", "")
-        gemini_eval_api_key_2 = config_manager.get("gemini_eval_api_key_2", "")
-        gemini_eval_api_key_3 = config_manager.get("gemini_eval_api_key_3", "")
-        gemini_eval_api_key_4 = config_manager.get("gemini_eval_api_key_4", "")
-        gemini_eval_api_key_5 = config_manager.get("gemini_eval_api_key_5", "")
-        gemini_eval_api_key_6 = config_manager.get("gemini_eval_api_key_6", "")
-        gemini_eval_api_key_7 = config_manager.get("gemini_eval_api_key_7", "")
-        
-        # v5.0: full provider config for registry
-        provider_config = config_manager.get_all()
-        enable_ai_evaluation = config_manager.get("enable_ai_evaluation", True)
-        enable_smart_selection = config_manager.get("enable_smart_selection", True)
-        enable_ai_provider_routing = config_manager.get(
-            "enable_ai_provider_routing", True
-        )
-        max_concurrent_providers = config_manager.get("max_concurrent_providers", 10)
-        enable_adaptive_delay = config_manager.get("enable_adaptive_delay", True)
-        base_delay_ms = config_manager.get("base_delay_ms", 100)
-        max_delay_ms = config_manager.get("max_delay_ms", 2000)
+        config_manager.set_many(config_dialog.get_config())
+    except ValueError as e:
+        browser_menu_manager.show_error("Lỗi cấu hình", str(e))
+        return False
+    return bool(config_manager.get("groq_api_key")) or bool(
+        config_manager.get("gemini_api_key")
+    )
 
-        ai_provider = AIImageProvider(
-            gemini_key=gemini_key,
-            gemini_backup_key=gemini_backup_key,
-            gemini_keyword_backup=gemini_keyword_backup,
-            gemini_eval_api_key_1=gemini_eval_api_key_1,
-            gemini_eval_api_key_2=gemini_eval_api_key_2,
-            gemini_eval_api_key_3=gemini_eval_api_key_3,
-            gemini_eval_api_key_4=gemini_eval_api_key_4,
-            gemini_eval_api_key_5=gemini_eval_api_key_5,
-            gemini_eval_api_key_6=gemini_eval_api_key_6,
-            gemini_eval_api_key_7=gemini_eval_api_key_7,
-            groq_key=groq_key,
-            use_ollama=use_ollama,
-            ollama_url=ollama_url,
-            provider_config=provider_config,
-            enable_smart_selection=enable_smart_selection,
-            enable_ai_evaluation=enable_ai_evaluation,
-            enable_ai_provider_routing=enable_ai_provider_routing,
-            max_concurrent_providers=max_concurrent_providers,
-            enable_adaptive_delay=enable_adaptive_delay,
-            base_delay_ms=base_delay_ms,
-            max_delay_ms=max_delay_ms,
+
+def _resolve_batch_fields(browser: Browser, first_note) -> Optional[tuple]:
+    """Return (vocab, definition, examples, image) or None if cancelled."""
+    model_name = first_note.note_type()["name"]
+    available_fields = list(first_note.keys())
+    cfg = config_manager.get_all()
+    preset = get_preset(cfg, model_name)
+    always_show = config_manager.get("always_show_field_dialog", False)
+
+    if preset and not always_show:
+        mode = preset.get("image_generation_mode")
+        if mode:
+            config_manager.config["image_generation_mode"] = mode
+        return (
+            preset["vocabulary_field"],
+            preset["definition_field"],
+            preset.get("examples_field", ""),
+            preset["image_field"],
         )
+
+    field_dialog = FieldSelectionDialog(
+        model_name, available_fields, browser, initial=preset
+    )
+    if field_dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+
+    vocab_field = field_dialog.selected_vocab_field
+    definition_field = field_dialog.selected_definition_field
+    examples_field = field_dialog.selected_examples_field
+    image_field = field_dialog.selected_image_field
+
+    if field_dialog.save_as_preset:
+        presets = dict(cfg.get("note_type_presets") or {})
+        presets[model_name] = build_preset(
+            vocab_field,
+            definition_field,
+            examples_field,
+            image_field,
+            config_manager.get("image_generation_mode", "search"),
+        )
+        config_manager.set_many(
+            {
+                "vocabulary_field": vocab_field,
+                "definition_field": definition_field,
+                "examples_field": examples_field,
+                "image_field": image_field,
+                "note_type_presets": presets,
+            }
+        )
+    else:
+        config_manager.set_many(
+            {
+                "vocabulary_field": vocab_field,
+                "definition_field": definition_field,
+                "examples_field": examples_field,
+                "image_field": image_field,
+            }
+        )
+    return vocab_field, definition_field, examples_field, image_field
+
+
+def _build_ai_provider():
+    provider_config = config_manager.get_all()
+    return AIImageProvider(
+        gemini_key=config_manager.get("gemini_api_key", ""),
+        gemini_backup_key=config_manager.get("gemini_backup_api_key", ""),
+        gemini_keyword_backup=config_manager.get("gemini_keyword_api_key_backup", ""),
+        gemini_eval_api_key_1=config_manager.get("gemini_eval_api_key_1", ""),
+        gemini_eval_api_key_2=config_manager.get("gemini_eval_api_key_2", ""),
+        gemini_eval_api_key_3=config_manager.get("gemini_eval_api_key_3", ""),
+        gemini_eval_api_key_4=config_manager.get("gemini_eval_api_key_4", ""),
+        gemini_eval_api_key_5=config_manager.get("gemini_eval_api_key_5", ""),
+        gemini_eval_api_key_6=config_manager.get("gemini_eval_api_key_6", ""),
+        gemini_eval_api_key_7=config_manager.get("gemini_eval_api_key_7", ""),
+        groq_key=config_manager.get("groq_api_key", ""),
+        use_ollama=config_manager.get("use_ollama", False),
+        ollama_url=config_manager.get("ollama_url", "http://localhost:11434"),
+        provider_config=provider_config,
+        enable_smart_selection=config_manager.get("enable_smart_selection", True),
+        enable_ai_evaluation=config_manager.get("enable_ai_evaluation", True),
+        enable_ai_provider_routing=config_manager.get("enable_ai_provider_routing", True),
+        max_concurrent_providers=config_manager.get("max_concurrent_providers", 6),
+        enable_adaptive_delay=config_manager.get("enable_adaptive_delay", True),
+        base_delay_ms=config_manager.get("base_delay_ms", 100),
+        max_delay_ms=config_manager.get("max_delay_ms", 2000),
+    )
+
+
+def _run_batch_processing(
+    browser: Browser,
+    note_ids: list,
+    vocab_field: str,
+    definition_field: str,
+    examples_field: str,
+    image_field: str,
+    *,
+    batch_meta: Optional[dict] = None,
+):
+    """Start background image batch for note_ids."""
+    try:
+        ai_provider = _build_ai_provider()
     except APIError as e:
         browser_menu_manager.show_error("Lỗi API", str(e))
         return
-    
-    # Bước 6: Hiển thị confirm dialog
+
     mode_key = config_manager.get("image_generation_mode", "search")
     mode_labels = {
-        "search": "Tìm kiếm (Gemini/Groq + nguồn ảnh)",
-        "generate": "Tạo ảnh AI (Imagen)",
-        "smart": "Thông minh (ưu tiên AI, fallback tìm kiếm)",
+        "search": "Tìm kiếm",
+        "generate": "Tạo ảnh (Imagen)",
+        "smart": "Thông minh",
     }
-    mode_label = mode_labels.get(mode_key, mode_key)
-    confirm_msg = f"""Bạn sắp thêm ảnh AI cho {len(note_ids)} thẻ.
-
-Chế độ: {mode_label}
-Field từ vựng: {vocab_field}
-Field ảnh: {image_field}
-
-Tiếp tục?"""
-    
+    confirm_msg = (
+        f"Thêm ảnh cho {len(note_ids)} thẻ.\n\n"
+        f"Chế độ: {mode_labels.get(mode_key, mode_key)}\n"
+        f"Từ vựng → {vocab_field}\n"
+        f"Ảnh → {image_field}\n\nTiếp tục?"
+    )
     if not browser_menu_manager.show_question("Xác nhận", confirm_msg):
         return
-    
-    # Bước 7: Tạo Progress Dialog
+
     progress_dialog = ProgressDialog(len(note_ids), browser)
     progress_dialog.show()
-    
-    # Bước 8: Chạy background processing
+    progress_dialog.set_cancel_callback(bg_processor.cancel)
+
     task = AddImageTask(
-        ai_provider,
-        image_handler,
-        vocab_field,
-        definition_field,
-        examples_field,  # ✨ NEW: Examples field
-        image_field
+        ai_provider, image_handler, vocab_field, definition_field, examples_field, image_field
     )
-    
-    successful_count = 0
-    skipped_count = 0
-    failed_count = 0
-    
-    # ✨ OPTIMIZE: Batch UI updates (reduce main thread thrashing)
-    last_ui_update = [0]  # Track last update time
-    update_interval_ms = 500  # Update UI every 500ms
-    
+    last_ui_update = [0.0]
+    update_interval_ms = 400
+
     def on_progress(current, total, message):
-        """
-        Called periodically during background processing.
-        current: How many notes processed so far
-        total: Total notes to process
-        message: Status message
-        """
-        logger.debug(f"[PROGRESS] {current}/{total}: {message}")
-        
-        # Only update UI every update_interval_ms or on completion
         now = time.time() * 1000
-        should_update = (now - last_ui_update[0] > update_interval_ms) or (current == total)
-        
-        if should_update:
-            last_ui_update[0] = now
-            # Cập nhật progress dialog từ main thread
-            def _update_ui():
-                if not progress_dialog.is_cancelled:
-                    # Parse message để lấy status và detail
-                    parts = message.split(" | ")
-                    status_msg = parts[0] if len(parts) > 0 else message
-                    detail_msg = parts[1] if len(parts) > 1 else ""
-                    
-                    progress_dialog.update_progress(current, total, status_msg, detail_msg)
-                    # Don't show stats during processing - wait for on_success
-                    # This prevents confusing UI with 0/0/0 counts
-            
-            mw.taskman.run_on_main(_update_ui)
-    
+        if (now - last_ui_update[0] < update_interval_ms) and current != total:
+            return
+        last_ui_update[0] = now
+
+        def _update_ui():
+            if progress_dialog.is_cancelled:
+                return
+            parts = message.split(" | ")
+            progress_dialog.update_progress(
+                current, total, parts[0], parts[1] if len(parts) > 1 else ""
+            )
+
+        mw.taskman.run_on_main(_update_ui)
+
     def on_success(result):
-        logger.info(f"[SUCCESS] Background processing completed")
         results = result.get("results", [])
         errors = result.get("errors", [])
-        
-        logger.debug(f"Results analysis: {len(results)} results, {len(errors)} errors")
-        
-        # Properly categorize results
-        successful = []      # Notes where images were actually added (True)
-        skipped_results = [] # Notes that were skipped (already had images)
-        failed_results = []  # Notes where operation failed (False)
-        
-        for idx, r in enumerate(results):
-            # 🔧 FIX v5.3: Better validation of tuple format
-            if not isinstance(r, tuple):
-                logger.warning(f"Unexpected result type at index {idx}: {type(r).__name__} = {repr(r)}")
-                failed_results.append((idx, f"Invalid result format: {repr(r)[:50]}"))
-                continue
-            
-            if len(r) < 2:
-                logger.warning(f"Result tuple too short at index {idx}: {repr(r)}")
-                failed_results.append((idx, f"Invalid result: {repr(r)[:50]}"))
-                continue
-            
-            status, message = r[0], r[1]
-            logger.debug(f"Result {idx}: status={repr(status)}, message={message[:100] if isinstance(message, str) else message}")
-            
-            # Use equality comparison (==) instead of identity (is) for reliability
-            if status is True or status == True:
-                successful.append((idx, message))
-            elif status == "skipped":
-                skipped_results.append((idx, message))
-            else:  # False or any other falsy value
-                failed_results.append((idx, message))
-        
-        # Add any captured errors
-        all_failures = [msg for _, msg in failed_results] + errors
-        
-        nonlocal successful_count, skipped_count, failed_count
-        successful_count = len(successful)
-        skipped_count = len(skipped_results)
-        failed_count = len(all_failures)
-        
-        logger.info(f"📊 Summary: {successful_count} successful, {skipped_count} skipped, {failed_count} failed")
-        
-        # Cập nhật progress dialog hoàn thành
-        def _finish_ui():
-            progress_dialog.finish(successful_count, skipped_count, failed_count)
-            
-            # Hiển thị summary
-            summary = f"""✅ Hoàn thành!
+        pending = result.get("pending_note_ids") or []
 
-Thành công: {successful_count}
-ℹ Bỏ qua (đã có ảnh): {skipped_count}
-Thất bại: {failed_count}"""
-            
-            if all_failures:
-                summary += "\n\n❌ Lỗi (5 lỗi đầu tiên):"
-                for error in all_failures[:5]:
-                    if isinstance(error, str):
-                        error_text = error[:100]
-                    else:
-                        error_text = str(error)[:100]
-                    summary += f"\n• {error_text}"
-            
+        successful = skipped_results = failed_results = 0
+        for r in results:
+            if not isinstance(r, tuple) or len(r) < 2:
+                failed_results += 1
+                continue
+            st = r[0]
+            if st is True:
+                successful += 1
+            elif st == "skipped":
+                skipped_results += 1
+            else:
+                failed_results += 1
+        failed_results += len(errors)
+
+        meta = batch_meta or {
+            "vocabulary_field": vocab_field,
+            "definition_field": definition_field,
+            "examples_field": examples_field,
+            "image_field": image_field,
+        }
+        if pending:
+            config_manager.set_many(
+                {
+                    "pending_batch_note_ids": pending,
+                    "pending_batch_meta": meta,
+                }
+            )
+        elif not progress_dialog.is_cancelled:
+            config_manager.clear_pending_batch()
+
+        def _finish_ui():
+            progress_dialog.finish(successful, skipped_results, failed_results)
+            summary = (
+                f"Thành công: {successful}\n"
+                f"Bỏ qua: {skipped_results}\n"
+                f"Thất bại: {failed_results}"
+            )
+            if pending:
+                summary += f"\n\n⏸ Đã lưu {len(pending)} thẻ — dùng menu «Tiếp tục batch đã dừng»."
             progress_dialog.detail_label.setText(summary)
-        
+
         mw.taskman.run_on_main(_finish_ui)
-        
-        # Refresh browser on main thread after a short delay
+
         def refresh_after_delay():
             time.sleep(1)
             try:
                 mw.taskman.run_on_main(browser.search)
-            except Exception as e:
-                logger.debug(f"Browser refresh failed (window may be closed): {e}")
-        
-        refresh_thread = threading.Thread(target=refresh_after_delay, daemon=True)
-        refresh_thread.start()
-    
+            except Exception:
+                pass
+
+        threading.Thread(target=refresh_after_delay, daemon=True).start()
+
     def on_error(error_msg):
-        logger.error(f"[ERROR] {error_msg}")
         def _error_ui():
             progress_dialog.reject()
             browser_menu_manager.show_error("Lỗi", error_msg)
+
         mw.taskman.run_on_main(_error_ui)
-    
-    # Xử lý từng note ở background
-    def process_func(note):
-        success, message = task.process_note(note)
-        return success, message
-    
+
     bg_processor.process_cards_in_background(
         note_ids,
-        process_func,
+        lambda note: task.process_note(note),
         on_progress=on_progress,
         on_success=on_success,
         on_error=on_error,
-        title=f"AnkiAI - Đang thêm ảnh ({len(note_ids)} thẻ)"
+        title=f"AnkiAI ({len(note_ids)} thẻ)",
+    )
+
+
+def on_browser_menu_resume_batch(browser: Browser):
+    config_manager.reload()
+    pending = config_manager.get("pending_batch_note_ids") or []
+    meta = config_manager.get("pending_batch_meta") or {}
+    if not pending:
+        browser_menu_manager.show_info(
+            "AnkiAI", "Không có batch nào đang chờ tiếp tục."
+        )
+        return
+    if not _ensure_ai_provider(browser):
+        return
+    _run_batch_processing(
+        browser,
+        pending,
+        meta.get("vocabulary_field", config_manager.get("vocabulary_field")),
+        meta.get("definition_field", config_manager.get("definition_field")),
+        meta.get("examples_field", config_manager.get("examples_field")),
+        meta.get("image_field", config_manager.get("image_field")),
+        batch_meta=meta,
+    )
+
+
+def on_browser_menu_add_images(browser: Browser):
+    """Browser menu: add images to selected notes."""
+    note_ids = browser_menu_manager.get_selected_note_ids(browser)
+    if not note_ids:
+        browser_menu_manager.show_warning("Cảnh báo", "Vui lòng chọn ít nhất 1 thẻ")
+        return
+
+    config_manager.reload()
+
+    if not _ensure_ai_provider(browser):
+        return
+
+    pending = config_manager.get("pending_batch_note_ids") or []
+    batch_dialog = BatchOptionsDialog(
+        len(note_ids),
+        default_max=int(config_manager.get("max_notes_per_batch", 100)),
+        pending_count=len(pending),
+        parent=browser,
+    )
+    if batch_dialog.exec() != QDialog.DialogCode.Accepted:
+        return
+
+    if batch_dialog.use_pending and pending:
+        on_browser_menu_resume_batch(browser)
+        return
+
+    max_n = batch_dialog.max_notes
+    if max_n > 0 and len(note_ids) > max_n:
+        note_ids = note_ids[:max_n]
+
+    try:
+        first_note = mw.col.get_note(note_ids[0])
+    except Exception as e:
+        browser_menu_manager.show_error("Lỗi", f"Không thể lấy note: {e}")
+        return
+
+    fields = _resolve_batch_fields(browser, first_note)
+    if not fields:
+        return
+    vocab_field, definition_field, examples_field, image_field = fields
+
+    _run_batch_processing(
+        browser,
+        note_ids,
+        vocab_field,
+        definition_field,
+        examples_field,
+        image_field,
     )
 
 
@@ -637,11 +621,7 @@ def open_config_dialog():
         try:
             config = config_dialog.get_config()
             logger.debug(f"[open_config_dialog] Saving config")
-            for key, val in config.items():
-                config_manager.set(key, val)
-            
-            # Force save config
-            config_manager.save_config()
+            config_manager.set_many(config)
             
             logger.info(f"[open_config_dialog] Config saved successfully")
             QMessageBox.information(mw, "AnkiAI", "Đã lưu cấu hình thành công! ✓")
@@ -694,7 +674,8 @@ def setup_addon():
         def setup_browser_menus(browser):
             browser_menu_manager.setup_browser_menu(
                 browser,
-                on_browser_menu_add_images
+                on_browser_menu_add_images,
+                on_browser_menu_resume_batch,
             )
         
         gui_hooks.browser_menus_did_init.append(setup_browser_menus)

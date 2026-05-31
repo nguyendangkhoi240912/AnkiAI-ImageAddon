@@ -69,3 +69,14 @@ class TestProcessImageStatus:
         )
         assert status is True
         assert "thành công" in msg.lower()
+
+    @patch.object(ImageHandler, "insert_image_to_note", return_value=False)
+    def test_save_and_insert_removes_orphan(
+        self, _insert, handler, empty_note
+    ):
+        handler.col.media.writeData.return_value = "orphan.jpg"
+        status, _ = handler.save_and_insert(
+            empty_note, b"\xff\xd8\xff\x00", "word", "Image"
+        )
+        assert status == "skipped"
+        handler.col.media.trash_files.assert_called_once_with(["orphan.jpg"])

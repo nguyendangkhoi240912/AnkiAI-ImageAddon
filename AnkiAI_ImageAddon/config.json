@@ -83,5 +83,13 @@
     "max_concurrent_requests": 5,
     "enable_concurrent_downloads": true,
 
-    "auto_add_on_sync": false
+    "auto_add_on_sync": false,
+
+    "note_type_presets": {},
+    "always_show_field_dialog": false,
+    "max_notes_per_batch": 100,
+    "pending_batch_note_ids": [],
+    "pending_batch_meta": {},
+    "prefer_fewer_api_calls": true,
+    "max_eval_candidates": 2
 }

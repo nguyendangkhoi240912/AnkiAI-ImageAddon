@@ -130,6 +130,19 @@ class ConfigManager:
         "imagen_default_size": "1024x1024",
         "imagen_enable_safety_checking": True,
         "imagen_enable_cost_tracking": True,
+
+        # v5.1: Note-type presets (fields + mode per model name)
+        "note_type_presets": {},
+        "always_show_field_dialog": False,
+
+        # v5.1: Batch control
+        "max_notes_per_batch": 100,
+        "pending_batch_note_ids": [],
+        "pending_batch_meta": {},
+
+        # v5.1: Fewer API calls while keeping quality
+        "prefer_fewer_api_calls": True,
+        "max_eval_candidates": 2,
     }
     
     # Tên thư mục addon (dùng để Anki đọc/ghi config đúng)
@@ -190,10 +203,19 @@ class ConfigManager:
         val = self.config.get(key, default if default is not None else self.DEFAULT_CONFIG.get(key))
         return val
     
-    def set(self, key: str, value: Any) -> None:
+    def set(self, key: str, value: Any, *, save: bool = True) -> None:
         """Cập nhật giá trị config"""
         self.config[key] = value
+        if save:
+            self.save_config()
+
+    def set_many(self, updates: Dict[str, Any]) -> None:
+        """Update several keys and save once."""
+        self.config.update(updates)
         self.save_config()
+
+    def clear_pending_batch(self) -> None:
+        self.set_many({"pending_batch_note_ids": [], "pending_batch_meta": {}})
     
     def save_config(self) -> None:
         """Lưu config vào Anki"""

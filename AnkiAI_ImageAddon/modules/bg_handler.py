@@ -59,6 +59,7 @@ class BackgroundProcessor:
             """Công việc chính ở background - CONCURRENT processing"""
             try:
                 total = len(note_ids)
+                pending_remaining = set(note_ids)
                 logger.info(f"🚀 Starting background work: Processing {total} notes (concurrent)")
                 
                 # 🟡 MEDIUM FIX v5.1: Pre-load all notes to avoid N+1 queries
@@ -77,7 +78,7 @@ class BackgroundProcessor:
                 def process_single_note(index, note_id):
                     """Process a single note - runs in thread pool"""
                     if self.cancelled:
-                        return (False, "Đã hủy")
+                        return ("skipped", "Đã hủy")
                     
                     try:
                         # 🟡 MEDIUM FIX: Lookup from pre-loaded dict instead of DB query
@@ -109,6 +110,9 @@ class BackgroundProcessor:
                             completed[0] += 1
                             current = completed[0]
                         
+                        with db_lock:
+                            pending_remaining.discard(note_id)
+
                         if on_progress:
                             progress_msg = f"Đang xử lý thẻ {current}/{total}"
                             on_progress(current, total, progress_msg)
@@ -167,8 +171,14 @@ class BackgroundProcessor:
                         raise
                 else:
                     logger.info(f"⏭️  No notes were modified, skipping database save")
-                
-                return {"results": results, "errors": errors}
+
+                out = {"results": results, "errors": errors}
+                if self.cancelled and pending_remaining:
+                    out["pending_note_ids"] = list(pending_remaining)
+                    logger.info(
+                        f"⏸️ Batch paused: {len(pending_remaining)} notes remaining"
+                    )
+                return out
             
             except Exception as e:
                 error_msg = f"Lỗi background: {str(e)}"
