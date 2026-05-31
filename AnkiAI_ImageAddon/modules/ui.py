@@ -833,10 +833,14 @@ class ConfigDialog(QDialog):
         except Exception as e:
             results.append(("Lorem Picsum", str(e), False, "Connection error"))
         
-        # Test Library of Congress (no API key needed)
+        # Test Library of Congress — use same URL/params/headers as backend (www.loc.gov/search)
         try:
-            response = requests.get("https://loc.gov/pictures/search/", 
-                                   params={"q": "test", "fo": "json"}, timeout=5)
+            response = requests.get(
+                "https://www.loc.gov/search",
+                params={"q": "test", "fo": "json", "fa": "online-format:image"},
+                headers={"User-Agent": "AnkiAI-ImageAddon/5.0 (Educational flashcard tool)"},
+                timeout=8,
+            )
             if response.status_code == 200:
                 results.append(("Library of Congress", "OK", True, "Historical images"))
             else:
@@ -844,9 +848,39 @@ class ConfigDialog(QDialog):
         except Exception as e:
             results.append(("Library of Congress", str(e), False, "Connection error"))
         
-        # Skip Wikimedia Commons test (persistently blocked with 403)
-        # The provider still works for actual image search, just blocked in test
-        results.append(("Wikimedia Commons", "Skipped", None, "Test blocked by server"))
+        # Test Wikimedia Commons — use the Action API exactly as the backend does
+        try:
+            wiki_headers = {
+                "User-Agent": "AnkiAI-ImageAddon/5.0 (Educational flashcard tool; contact: addon-user)",
+                "Accept": "application/json",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://commons.wikimedia.org/",
+            }
+            response = requests.get(
+                "https://commons.wikimedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "list": "search",
+                    "srsearch": "tree",
+                    "srnamespace": "6",
+                    "srlimit": 1,
+                    "format": "json",
+                    "origin": "*",
+                },
+                headers=wiki_headers,
+                timeout=8,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                hits = data.get("query", {}).get("search", [])
+                if hits:
+                    results.append(("Wikimedia Commons", "OK", True, "Free encyclopedic images"))
+                else:
+                    results.append(("Wikimedia Commons", "OK (0 results)", True, "Connected but no hits"))
+            else:
+                results.append(("Wikimedia Commons", f"Error {response.status_code}", False, "API error"))
+        except Exception as e:
+            results.append(("Wikimedia Commons", str(e), False, "Connection error"))
         
         # Test Met Museum (no API key needed)
         try:

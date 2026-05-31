@@ -9,12 +9,11 @@ from aqt.qt import QMessageBox, QDialog
 import sys
 import os
 import logging
+from typing import Optional
 import re
 import time
 import threading
 import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
 def _setup_file_logging() -> logging.Logger:
     """Log to addon/logs/ankiai.log; skip file handler if directory is not writable."""
     addon_dir = os.path.dirname(os.path.abspath(__file__))
@@ -76,7 +75,25 @@ class AddImageTask(ProcessingTask):
         self.definition_field = definition_field
         self.examples_field = examples_field  # ✨ NEW: Examples field
         self.image_field = image_field
-    
+
+    def _overwrite_existing(self) -> bool:
+        return not config_manager.get("skip_existing_images", True)
+
+    def _ensure_image_field(self, note) -> Optional[tuple]:
+        if self.image_field in note:
+            return None
+        available = list(note.keys())
+        return False, f"Field '{self.image_field}' không tồn tại. Có: {available}"
+
+    @staticmethod
+    def _finalize_result(success, message: str, vocabulary: str) -> tuple:
+        """Map internal success flag to (True | 'skipped' | False, message)."""
+        if success is True:
+            return True, message or f"Thêm ảnh thành công: {vocabulary}"
+        if success == "skipped":
+            return "skipped", message or "Đã có ảnh"
+        return False, message or "Thất bại"
+
     def process_note(self, note) -> tuple:
         """
         Xử lý một note: Lấy từ vựng -> Gọi AI -> Tải ảnh -> Chèn vào note
@@ -85,7 +102,7 @@ class AddImageTask(ProcessingTask):
             note: Anki Note object
         
         Returns:
-            Tuple (success, message)
+            Tuple (success, message) where success is True/False/"skipped"
         """
         try:
             # 1. Lấy từ vựng, định nghĩa và ví dụ từ note
@@ -114,7 +131,12 @@ class AddImageTask(ProcessingTask):
                 else:
                     logger.info(f"📌 Image already exists for '{vocabulary}', but skip_existing_images is disabled. Overwriting...")
             
+            field_error = self._ensure_image_field(note)
+            if field_error:
+                return field_error
+
             generation_mode = config_manager.get("image_generation_mode", "search")
+            overwrite = self._overwrite_existing()
             logger.info(f"📌 Image generation mode: {generation_mode}")
             
             success = False
@@ -133,15 +155,23 @@ class AddImageTask(ProcessingTask):
                         image_data = images[0]
                         filename = self.image_handler.get_image_filename(vocabulary, image_data)
                         saved_filename = self.image_handler.save_image_to_anki(image_data, filename)
-                        success = self.image_handler.insert_image_to_note(note, saved_filename, self.image_field)
-                        if success:
+                        inserted = self.image_handler.insert_image_to_note(
+                            note, saved_filename, self.image_field, overwrite=overwrite
+                        )
+                        if inserted:
+                            success = True
                             message = f"Tạo ảnh AI thành công: {saved_filename}"
                         else:
-                            message = "Không chèn được ảnh vào note (đã có ảnh)"
+                            # Image already exists - this is "skipped", not failure
+                            success = "skipped"
+                            message = "Đã có ảnh (không ghi đè)"
+                            logger.info(f"📌 Image already exists in field, skipping insertion for '{vocabulary}'")
                     else:
+                        success = False
                         message = "AI không tạo được ảnh (không có dữ liệu trả về)"
                 except Exception as e:
-                    logger.error(f"Imagen generation error: {e}")
+                    logger.error(f"Imagen generation error: {e}", exc_info=True)
+                    success = False
                     message = f"Lỗi tạo ảnh AI: {e}"
             
             elif generation_mode == "smart":
@@ -159,92 +189,98 @@ class AddImageTask(ProcessingTask):
                         # Generated image bytes
                         filename = self.image_handler.get_image_filename(vocabulary, result)
                         saved_filename = self.image_handler.save_image_to_anki(result, filename)
-                        success = self.image_handler.insert_image_to_note(note, saved_filename, self.image_field)
-                        if success:
+                        inserted = self.image_handler.insert_image_to_note(
+                            note, saved_filename, self.image_field, overwrite=overwrite
+                        )
+                        if inserted:
+                            success = True
                             message = f"Tạo ảnh AI thành công (Smart): {saved_filename}"
                         else:
-                            message = "Không chèn được ảnh vào note (đã có ảnh)"
+                            # Image already exists - this is "skipped", not failure
+                            success = "skipped"
+                            message = "Đã có ảnh (không ghi đè)"
+                            logger.info(f"📌 Image already exists, skipping Imagen insertion for '{vocabulary}'")
                     else:
                         # Search-based image URL
                         image_url = result
                         if image_url:
                             logger.info(f"📌 Got search image URL (Smart): {image_url[:80]}...")
                             success, message = self.image_handler.process_image(
-                                image_url, note, vocabulary, self.image_field
+                                image_url, note, vocabulary, self.image_field, overwrite=overwrite
                             )
                         else:
+                            success = False
                             message = "Smart search không tìm được ảnh"
                 except Exception as e:
-                    logger.error(f"Smart selection error: {e}")
+                    logger.error(f"Smart selection error: {e}", exc_info=True)
+                    success = False
                     message = f"Lỗi chọn ảnh thông minh: {e}"
             
             else:
                 # Default traditional search mode
                 logger.info(f"📌 Searching image for '{vocabulary}'...")
-                image_url = self.ai_provider.get_image_url(vocabulary, definition, examples)
-                
-                if not image_url:
-                    logger.warning(f"📌 AI returned no image URL for '{vocabulary}'")
-                    return False, "AI không tìm được ảnh"
-                
-                logger.info(f"📌 Got image URL: {image_url[:80]}...")
-                
-                # 4. Xử lý ảnh (retry fallback URLs if download fails)
-                logger.debug(f"📌 Processing image for '{vocabulary}'...")
-                success, message = self.image_handler.process_image(
-                    image_url, note, vocabulary, self.image_field
-                )
-                
-                # 🚀 CRITICAL FIX v5.1: Parallel fallback retry instead of blocking
-                if not success and "Download" in message:
-                    fallback_urls = self.ai_provider.get_fallback_image_urls()
-                    if fallback_urls:
-                        logger.info(f"📌 Primary URL failed, trying {len(fallback_urls)} fallback URLs in parallel...")
-                        
-                        def try_fallback_url(url):
-                            """Try to download fallback URL"""
-                            try:
-                                return self.image_handler.process_image(
-                                    url, note, vocabulary, self.image_field
-                                )
-                            except Exception as e:
-                                return False, str(e)
-                        
-                        # Parallel retry: first successful result wins
-                        with ThreadPoolExecutor(max_workers=3) as executor:
-                            futures = {
-                                executor.submit(try_fallback_url, url): url 
-                                for url in fallback_urls
-                            }
-                            
-                            for future in as_completed(futures, timeout=24):  # 24s timeout for all
+                try:
+                    image_url = self.ai_provider.get_image_url(vocabulary, definition, examples)
+                    
+                    if not image_url:
+                        logger.warning(f"📌 AI returned no image URL for '{vocabulary}'")
+                        return False, "AI không tìm được ảnh"
+                    
+                    logger.info(f"📌 Got image URL: {image_url[:80]}...")
+                    
+                    # 4. Xử lý ảnh (retry fallback URLs if download fails)
+                    logger.debug(f"📌 Processing image for '{vocabulary}'...")
+                    success, message = self.image_handler.process_image(
+                        image_url, note, vocabulary, self.image_field, overwrite=overwrite
+                    )
+
+                    # Sequential fallback (same note — avoid parallel races on note/media)
+                    if success is not True and success != "skipped" and "Download" in message:
+                        fallback_urls = self.ai_provider.get_fallback_image_urls()
+                        if fallback_urls:
+                            logger.info(
+                                f"📌 Primary URL failed, trying {len(fallback_urls)} fallback URLs..."
+                            )
+                            for url in fallback_urls:
                                 try:
-                                    result_success, result_msg = future.result()
-                                    if result_success:
+                                    result_success, result_msg = self.image_handler.process_image(
+                                        url, note, vocabulary, self.image_field, overwrite=overwrite
+                                    )
+                                    if result_success is True:
                                         success, message = True, result_msg
-                                        logger.info(f"✅ Fallback URL succeeded: {futures[future][:80]}")
-                                        break  # First success wins
+                                        logger.info(f"✅ Fallback URL succeeded: {url[:80]}")
+                                        break
+                                    if result_success == "skipped":
+                                        success, message = "skipped", result_msg
+                                        break
                                 except Exception as e:
-                                    logger.debug(f"Fallback URL failed: {str(e)}")
-                                    pass
+                                    logger.debug(f"Fallback URL failed: {e}")
+                
+                except Exception as e:
+                    logger.error(f"Search mode error: {e}", exc_info=True)
+                    message = f"Lỗi chế độ tìm kiếm: {e}"
             
-            logger.info(f"📌 Image processing result: success={success}, msg={message}")
-            
-            if success:
-                # ✨ NOTE: Do NOT call note.flush() here!
-                # The background processor will call col.update_note() + col.save()
-                # Using both flush() and update_note() causes conflicts in Anki 25.x
-                logger.info(f"✅ Note modified, will be saved by background processor: {vocabulary}")
-                return True, f"Thêm ảnh thành công: {vocabulary}"
+            logger.info(f"📌 Image processing result: success={repr(success)}, msg={message}")
+
+            if success is True:
+                logger.info(
+                    f"✅ Note modified, will be saved by background processor: {vocabulary}"
+                )
+            elif success == "skipped":
+                logger.info(f"⏭️ Note skipped (no DB update): {vocabulary}")
             else:
                 logger.warning(f"📌 Image processing failed: {message}")
-                return False, message
+
+            return self._finalize_result(success, message, vocabulary)
         
         except APIError as e:
+            logger.error(f"API Error: {e}", exc_info=True)
             return False, f"API Error: {str(e)}"
         except ImageError as e:
+            logger.error(f"Image Error: {e}", exc_info=True)
             return False, f"Image Error: {str(e)}"
         except Exception as e:
+            logger.error(f"Unexpected error: {e}", exc_info=True)
             return False, f"Lỗi không xác định: {str(e)}"
 
 
@@ -408,9 +444,16 @@ def on_browser_menu_add_images(browser: Browser):
         return
     
     # Bước 6: Hiển thị confirm dialog
+    mode_key = config_manager.get("image_generation_mode", "search")
+    mode_labels = {
+        "search": "Tìm kiếm (Gemini/Groq + nguồn ảnh)",
+        "generate": "Tạo ảnh AI (Imagen)",
+        "smart": "Thông minh (ưu tiên AI, fallback tìm kiếm)",
+    }
+    mode_label = mode_labels.get(mode_key, mode_key)
     confirm_msg = f"""Bạn sắp thêm ảnh AI cho {len(note_ids)} thẻ.
 
-Chế độ: Search (dùng Gemini/Groq/Ollama + Image Provider)
+Chế độ: {mode_label}
 Field từ vựng: {vocab_field}
 Field ảnh: {image_field}
 
@@ -442,6 +485,12 @@ Tiếp tục?"""
     update_interval_ms = 500  # Update UI every 500ms
     
     def on_progress(current, total, message):
+        """
+        Called periodically during background processing.
+        current: How many notes processed so far
+        total: Total notes to process
+        message: Status message
+        """
         logger.debug(f"[PROGRESS] {current}/{total}: {message}")
         
         # Only update UI every update_interval_ms or on completion
@@ -459,7 +508,8 @@ Tiếp tục?"""
                     detail_msg = parts[1] if len(parts) > 1 else ""
                     
                     progress_dialog.update_progress(current, total, status_msg, detail_msg)
-                    progress_dialog.update_stats(successful_count, skipped_count, failed_count)
+                    # Don't show stats during processing - wait for on_success
+                    # This prevents confusing UI with 0/0/0 counts
             
             mw.taskman.run_on_main(_update_ui)
     
@@ -468,19 +518,45 @@ Tiếp tục?"""
         results = result.get("results", [])
         errors = result.get("errors", [])
         
-        # Count successful operations: results are (True, msg), ("skipped", msg), or (False, msg)
-        successful = [r for r in results if isinstance(r, tuple) and r[0] is True]
-        # Count skipped: cards that already had images
-        skipped_results = [r for r in results if isinstance(r, tuple) and r[0] == "skipped"]
-        # Count failures: both exception errors AND notes that returned (False, message)
-        failed_results = [r for r in results if isinstance(r, tuple) and r[0] is False]
-        failed_errors = [e for e in errors if e]
-        all_failures = [r[1] for r in failed_results] + failed_errors
+        logger.debug(f"Results analysis: {len(results)} results, {len(errors)} errors")
+        
+        # Properly categorize results
+        successful = []      # Notes where images were actually added (True)
+        skipped_results = [] # Notes that were skipped (already had images)
+        failed_results = []  # Notes where operation failed (False)
+        
+        for idx, r in enumerate(results):
+            # 🔧 FIX v5.3: Better validation of tuple format
+            if not isinstance(r, tuple):
+                logger.warning(f"Unexpected result type at index {idx}: {type(r).__name__} = {repr(r)}")
+                failed_results.append((idx, f"Invalid result format: {repr(r)[:50]}"))
+                continue
+            
+            if len(r) < 2:
+                logger.warning(f"Result tuple too short at index {idx}: {repr(r)}")
+                failed_results.append((idx, f"Invalid result: {repr(r)[:50]}"))
+                continue
+            
+            status, message = r[0], r[1]
+            logger.debug(f"Result {idx}: status={repr(status)}, message={message[:100] if isinstance(message, str) else message}")
+            
+            # Use equality comparison (==) instead of identity (is) for reliability
+            if status is True or status == True:
+                successful.append((idx, message))
+            elif status == "skipped":
+                skipped_results.append((idx, message))
+            else:  # False or any other falsy value
+                failed_results.append((idx, message))
+        
+        # Add any captured errors
+        all_failures = [msg for _, msg in failed_results] + errors
         
         nonlocal successful_count, skipped_count, failed_count
         successful_count = len(successful)
         skipped_count = len(skipped_results)
         failed_count = len(all_failures)
+        
+        logger.info(f"📊 Summary: {successful_count} successful, {skipped_count} skipped, {failed_count} failed")
         
         # Cập nhật progress dialog hoàn thành
         def _finish_ui():
@@ -494,9 +570,13 @@ Thành công: {successful_count}
 Thất bại: {failed_count}"""
             
             if all_failures:
-                summary += "\n\nLỗi (5 lỗi đầu):"
+                summary += "\n\n❌ Lỗi (5 lỗi đầu tiên):"
                 for error in all_failures[:5]:
-                    summary += f"\n- {error}"
+                    if isinstance(error, str):
+                        error_text = error[:100]
+                    else:
+                        error_text = str(error)[:100]
+                    summary += f"\n• {error_text}"
             
             progress_dialog.detail_label.setText(summary)
         
@@ -648,8 +728,8 @@ def cleanup_addon():
             logger.info("[ADDON] HTTP session closed")
         
         # Stop background processor if running
-        if bg_processor and hasattr(bg_processor, 'stop'):
-            bg_processor.stop()
+        if bg_processor and hasattr(bg_processor, 'cancel'):
+            bg_processor.cancel()
             logger.info("[ADDON] Background processor stopped")
         
         # Close feature database
