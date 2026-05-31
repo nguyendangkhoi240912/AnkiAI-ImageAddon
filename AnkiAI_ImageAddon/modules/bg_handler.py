@@ -91,15 +91,18 @@ class BackgroundProcessor:
                         result = process_func(note)
                         success, message = result
                         
-                        logger.info(f"📌 [{index + 1}/{total}] Process result: success={success}, msg={message}")
+                        logger.info(f"📌 [{index + 1}/{total}] Process result: success={repr(success)}, msg={message}")
                         
-                        # Serialize database writes
-                        if success:
+                        # 🔧 CRITICAL FIX v5.2: Only update note if success is True (not "skipped" or False)
+                        if success is True:
+                            # Note was actually modified - save it
                             with db_lock:
                                 col.update_note(note)
-                            logger.info(f"✅ [{index + 1}/{total}] Note {note_id} updated")
+                            logger.info(f"✅ [{index + 1}/{total}] Note {note_id} updated successfully")
+                        elif success == "skipped":
+                            logger.info(f"⏭️  [{index + 1}/{total}] Note {note_id} skipped: {message}")
                         else:
-                            logger.warning(f"⚠️  [{index + 1}/{total}] Failed: {message}")
+                            logger.warning(f"❌ [{index + 1}/{total}] Failed to process note {note_id}: {message}")
                         
                         # Update progress
                         with db_lock:
@@ -126,6 +129,8 @@ class BackgroundProcessor:
                 
                 # 🚀 Process cards concurrently (3 workers)
                 max_workers = min(3, total)
+                processed_notes_count = [0]  # Track truly processed notes
+                
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = {}
                     for index, note_id in enumerate(note_ids):
@@ -136,17 +141,32 @@ class BackgroundProcessor:
                         try:
                             result = future.result()
                             results.append(result)
+                            # Count successful operations (True means note was actually modified)
+                            if isinstance(result, tuple) and len(result) >= 2:
+                                success_status = result[0]
+                                # Only count True as actual success (not "skipped" or False)
+                                if success_status is True:
+                                    processed_notes_count[0] += 1
                         except Exception as e:
                             error_msg = f"❌ Thread error: {str(e)}"
                             errors.append(error_msg)
-                            logger.error(error_msg)
+                            logger.error(error_msg, exc_info=True)
                 
                 # Save all changes at once
-                logger.info(f"💾 Saving database... (processed {total} notes)")
-                # 🔒 CRITICAL FIX v5.1: Use global lock for col.save()
-                with _GLOBAL_DB_LOCK:
-                    col.save()
-                logger.info(f"✅ Database saved successfully!")
+                if processed_notes_count[0] > 0:
+                    logger.info(f"💾 Saving database... (processed {processed_notes_count[0]} notes with changes)")
+                    try:
+                        # 🔒 CRITICAL FIX v5.1: Use global lock for col.save()
+                        with _GLOBAL_DB_LOCK:
+                            col.save()
+                        logger.info(f"✅ Database saved successfully! ({processed_notes_count[0]} notes modified)")
+                    except Exception as e:
+                        error_msg = f"❌ Database save failed: {str(e)}"
+                        logger.error(error_msg, exc_info=True)
+                        errors.append(error_msg)
+                        raise
+                else:
+                    logger.info(f"⏭️  No notes were modified, skipping database save")
                 
                 return {"results": results, "errors": errors}
             

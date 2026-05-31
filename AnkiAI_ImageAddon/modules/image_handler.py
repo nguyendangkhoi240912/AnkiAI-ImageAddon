@@ -19,7 +19,10 @@ from urllib3.util.retry import Retry
 import os
 import re
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
+
+# process_note / process_image status: True = modified, "skipped" = no change, False = failed
+ProcessStatus = Union[bool, str]
 from pathlib import Path
 import threading
 
@@ -389,9 +392,14 @@ class ImageHandler:
         except Exception as e:
             raise ImageError(f"Error saving image to Anki: {str(e)}")
     
-    def insert_image_to_note(self, note, image_filename: str, 
-                            image_field_name: str = "Ảnh",
-                            responsive: bool = True) -> bool:
+    def insert_image_to_note(
+        self,
+        note,
+        image_filename: str,
+        image_field_name: str = "Ảnh",
+        responsive: bool = True,
+        overwrite: bool = False,
+    ) -> bool:
         """
         Chèn ảnh vào note với responsive design cho mobile
         
@@ -409,6 +417,7 @@ class ImageHandler:
             if image_field_name not in note:
                 # Thử tìm field tương tự
                 available_fields = list(note.keys())
+                logger.error(f"❌ Field '{image_field_name}' không tồn tại. Available: {available_fields}")
                 raise ImageError(f"Field '{image_field_name}' không tồn tại. "
                                f"Available: {available_fields}")
             
@@ -417,9 +426,10 @@ class ImageHandler:
             
             # Kiểm tra xem đã có ảnh không
             if current_content and "<img" in current_content:
-                # Nếu đã có ảnh, không thêm ảnh mới
-                logger.info(f"Image already exists in field, skipping")
-                return False
+                if not overwrite:
+                    logger.info("📌 Image already exists in field, skipping insertion")
+                    return False
+                logger.info("📌 Overwriting existing image in field")
             
             # Tạo HTML responsive cho ảnh - hỗ trợ mobile tốt
             if responsive:
@@ -432,22 +442,31 @@ class ImageHandler:
             else:
                 html_image = f'<img src="{image_filename}">'
             
-            # Nếu field có text nhưng không có ảnh, append ảnh vào cuối
-            if current_content:
+            # Ghi đè ảnh cũ, hoặc append nếu field chỉ có text
+            if current_content and "<img" in current_content and overwrite:
+                note[image_field_name] = html_image
+            elif current_content and "<img" not in current_content:
                 note[image_field_name] = current_content + "<br>" + html_image
             else:
-                # Field rỗng, chèn ảnh trực tiếp
                 note[image_field_name] = html_image
             
+            logger.debug(f"✅ Image inserted successfully: {image_filename}")
             return True
         
         except ImageError:
             raise
         except Exception as e:
+            logger.error(f"❌ Error inserting image to note: {str(e)}", exc_info=True)
             raise ImageError(f"Error inserting image to note: {str(e)}")
     
-    def process_image(self, url: str, note, vocabulary: str,
-                     image_field_name: str = "Ảnh") -> Tuple[bool, str]:
+    def process_image(
+        self,
+        url: str,
+        note,
+        vocabulary: str,
+        image_field_name: str = "Ảnh",
+        overwrite: bool = False,
+    ) -> Tuple[ProcessStatus, str]:
         """
         Công việc hoàn chỉnh: tải ảnh -> lưu -> chèn vào note
         
@@ -458,29 +477,41 @@ class ImageHandler:
             image_field_name: Tên trường ảnh
         
         Returns:
-            Tuple (success, message)
+            Tuple (success, message) - True only if note was modified
         """
         try:
+            if image_field_name not in note:
+                available_fields = list(note.keys())
+                raise ImageError(
+                    f"Field '{image_field_name}' không tồn tại. Available: {available_fields}"
+                )
+
             # 1. Tải ảnh
-            logger.info(f"Downloading image for '{vocabulary}'...")
+            logger.info(f"📌 Downloading image for '{vocabulary}'...")
             image_data = self.download_image(url)
             
             # 2. Tạo tên file và lưu
-            logger.debug(f"Saving image for '{vocabulary}'...")
+            logger.debug(f"📌 Saving image for '{vocabulary}'...")
             filename = self.get_image_filename(vocabulary, image_data)
             saved_filename = self.save_image_to_anki(image_data, filename)
             
             # 3. Chèn vào note
-            logger.debug(f"Inserting image into note...")
-            success = self.insert_image_to_note(note, saved_filename, image_field_name)
-            
+            logger.debug(f"📌 Inserting image into note...")
+            success = self.insert_image_to_note(
+                note, saved_filename, image_field_name, overwrite=overwrite
+            )
+
             if not success:
-                return False, "Đã có ảnh hoặc field không hợp lệ"
+                logger.info(f"⏭️  Note already has image, no changes made: {vocabulary}")
+                return "skipped", "Thẻ đã có ảnh rồi"
             
-            logger.info(f"Successfully added image for '{vocabulary}'")
+            logger.info(f"✅ Successfully added image for '{vocabulary}': {saved_filename}")
+            # Return True to indicate note was successfully modified
             return True, f"Thêm ảnh thành công: {saved_filename}"
         
         except ImageError as e:
+            logger.error(f"❌ Image error for '{vocabulary}': {str(e)}", exc_info=True)
             return False, str(e)
         except Exception as e:
+            logger.error(f"❌ Unexpected error for '{vocabulary}': {str(e)}", exc_info=True)
             return False, f"Lỗi không xác định: {str(e)}"
