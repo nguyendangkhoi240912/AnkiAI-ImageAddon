@@ -36,6 +36,12 @@ from .providers import (
     TenorProvider,
     PixabayAnimatedProvider,
     IconScoutProvider,
+    HPAPIProvider,
+    PotterAPIProvider,
+    WaifuPicsProvider,
+    NekosBestProvider,
+    StudioGhibliAPIProvider,
+    PokeAPIProvider,
 )
 from .providers.scientific import SCIENTIFIC_PRECISE_PROVIDERS
 
@@ -63,6 +69,12 @@ DOMAIN_PROVIDERS: Dict[str, List[str]] = {
         "tenor",
         "pixabay_animated",
         "iconscout",
+        "hp_api",
+        "potter_api",
+        "waifu_pics",
+        "nekos_best",
+        "studio_ghibli",
+        "poke_api",
     ],
     "animated": [
         "klipy",
@@ -70,6 +82,8 @@ DOMAIN_PROVIDERS: Dict[str, List[str]] = {
         "tenor",
         "pixabay_animated",
         "iconscout",
+        "waifu_pics",
+        "nekos_best",
     ],
     "medical": ["wikimedia_smart", "wikimedia", "isic", "europe_pmc", "pubchem"],
     "chemistry": ["pubchem", "chembl", "wikimedia"],
@@ -222,6 +236,14 @@ def build_smart_selector(
     _try_add(selector, "nasa", lambda: NASAImagesProvider())
     _try_add(selector, "codecogs", lambda: CodeCogsProvider())
     _try_add(selector, "bioicons", lambda: BioiconsProvider())
+
+    # Entertainment providers (free, no API key required)
+    _try_add(selector, "hp_api", lambda: HPAPIProvider())
+    _try_add(selector, "potter_api", lambda: PotterAPIProvider())
+    _try_add(selector, "waifu_pics", lambda: WaifuPicsProvider())
+    _try_add(selector, "nekos_best", lambda: NekosBestProvider())
+    _try_add(selector, "studio_ghibli", lambda: StudioGhibliAPIProvider())
+    _try_add(selector, "poke_api", lambda: PokeAPIProvider())
 
     if not selector.providers:
         raise ImageProviderError("No image providers configured")

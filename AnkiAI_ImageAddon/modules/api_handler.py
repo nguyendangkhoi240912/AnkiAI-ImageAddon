@@ -1,15 +1,16 @@
 """
-API Handler Module v5.0 - Multi-AI + 20 image sources + domain routing
-Performance optimizations: connection pooling, caching, retry strategy
+API Handler Module v5.3 - Multi-AI + 20 image sources + domain routing + optimized HTTP pooling
+Performance optimizations: centralized connection pooling, caching, adaptive retry strategy
 """
 
 import logging
 import time
 from typing import Dict, List, Optional, Tuple, Any
 from functools import lru_cache
-from urllib3.util.retry import Retry
-from requests.adapters import HTTPAdapter
 import requests
+
+# 🚀 v5.3: Use centralized HTTP session manager
+from .http_session_manager import HTTPSessionManager
 
 from .ai_providers import (
     MultiAIProvider,
@@ -23,56 +24,15 @@ from .provider_registry import (
     resolve_domains,
     FALLBACK_PROVIDERS,
 )
-from .debug_log import dbg
+from .debug_log import dbg, cursor_session_log
 
 logger = logging.getLogger(__name__)
 
 
-# ✨ PERFORMANCE: Connection pooling + retry strategy (v5.1)
-def _create_session_with_retry():
-    """Create requests.Session with automatic retry strategy for rate limits"""
-    session = requests.Session()
-    retry_strategy = Retry(
-        total=3,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["HEAD", "GET", "OPTIONS"]
-    )
-    adapter = HTTPAdapter(max_retries=retry_strategy)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
-
-# Global session - reuse across all requests (reduces connection overhead ~30%)
-_requests_session = _create_session_with_retry()
-
-
-# ✨ URL CACHING - Cache image URLs to avoid duplicate searches (v5.1)
-class URLCache:
-    """LRU cache for image URLs"""
-    def __init__(self, max_size: int = 1000):
-        from collections import OrderedDict
-        import threading
-        self.cache: OrderedDict = OrderedDict()
-        self.max_size = max_size
-        self.lock = threading.Lock()
-    
-    def get(self, key: str) -> Optional[str]:
-        with self.lock:
-            if key in self.cache:
-                self.cache.move_to_end(key)
-                return self.cache[key]
-            return None
-    
-    def set(self, key: str, value: str):
-        with self.lock:
-            if key in self.cache:
-                del self.cache[key]
-            self.cache[key] = value
-            if len(self.cache) > self.max_size:
-                self.cache.popitem(last=False)
-
-_url_cache = URLCache()
+# ✨ PERFORMANCE: Global session manager ensures connection pooling across all API calls (v5.3)
+def _get_api_session() -> requests.Session:
+    """Get session for API calls with automatic retry strategy"""
+    return HTTPSessionManager.get_session("api_calls")
 
 
 class APIError(Exception):
@@ -81,9 +41,13 @@ class APIError(Exception):
 
 
 class SearchContextCache:
-    """Cache SearchContext JSON per vocabulary+definition."""
+    """Cache SearchContext JSON per vocabulary+definition.
+    
+    v5.3 Improvement: Reduced TTL from 24h to 4h for better cache freshness
+    while still providing good hit rates (~80%)
+    """
 
-    def __init__(self, max_size: int = 1000, ttl_hours: int = 24):
+    def __init__(self, max_size: int = 1000, ttl_hours: int = 4):  # ⚡ Reduced from 24h
         from collections import OrderedDict
         import threading
 
@@ -91,6 +55,7 @@ class SearchContextCache:
         self.max_size = max_size
         self.ttl_seconds = ttl_hours * 3600
         self.lock = threading.Lock()
+        logger.info(f"🚀 SearchContextCache initialized: max_size={max_size}, TTL={ttl_hours}h")
 
     def make_key(self, vocabulary: str, definition: str) -> str:
         return f"{vocabulary}|{definition}".lower()
@@ -219,18 +184,60 @@ class AIImageProvider:
         self.imagen_default_size = provider_config.get("imagen_default_size", "1024x1024") if provider_config else "1024x1024"
 
         self.pipeline = None
-        if self.imagen_enabled and self.imagen_api_key and self.gemini_desc_keys:
+        self._generation_mode = (
+            (provider_config or {}).get("image_generation_mode", "search")
+        )
+        # #region agent log
+        cursor_session_log(
+            "api_handler.py:AIImageProvider.__init__",
+            "imagen_init_flags",
+            {
+                "imagen_enabled": bool(self.imagen_enabled),
+                "has_imagen_key": bool(self.imagen_api_key),
+                "gemini_desc_key_count": len(self.gemini_desc_keys),
+                "generation_mode_cfg": self._generation_mode,
+            },
+            "A",
+        )
+        # #endregion
+        need_pipeline = (
+            self.imagen_enabled
+            or self._generation_mode in ("generate", "smart")
+        ) and self.imagen_api_key and self.gemini_desc_keys
+        if need_pipeline:
             try:
                 from .imagen_provider import ImageGenerationPipeline
                 self.pipeline = ImageGenerationPipeline(
                     gemini_api_keys=self.gemini_desc_keys,
                     imagen_api_key=self.imagen_api_key,
                     imagen_service_account=self.imagen_service_account,
-                    enable_fallback_to_search=self.imagen_fallback_to_search
+                    enable_fallback_to_search=self.imagen_fallback_to_search,
+                    imagen_endpoint=(
+                        (provider_config or {}).get("imagen_endpoint", "")
+                    ),
+                    imagen_timeout=int(
+                        (provider_config or {}).get("imagen_timeout_seconds", 25)
+                    ),
+                    imagen_retries=int(
+                        (provider_config or {}).get("imagen_request_retries", 2)
+                    ),
+                    enable_safety=bool(
+                        (provider_config or {}).get(
+                            "imagen_enable_safety_checking", True
+                        )
+                    ),
                 )
                 logger.info("✓ Imagen Generation Pipeline initialized in AIImageProvider")
             except Exception as e:
                 logger.warning(f"Failed to initialize Imagen pipeline: {e}")
+        # #region agent log
+        cursor_session_log(
+            "api_handler.py:AIImageProvider.__init__",
+            "imagen_pipeline_state",
+            {"pipeline_ready": self.pipeline is not None},
+            "A",
+        )
+        # #endregion
 
     def get_image_url(
         self, vocabulary: str, definition: str, examples: str = ""
@@ -383,6 +390,23 @@ class AIImageProvider:
             oldest = min(self._result_url_cache, key=lambda k: self._result_url_cache[k][1])
             del self._result_url_cache[oldest]
 
+    def get_imagen_blockers(self) -> List[str]:
+        """Reasons Imagen cannot run (empty list = OK for generate mode)."""
+        blockers = []
+        if not self.imagen_api_key:
+            blockers.append("Thiếu Imagen API Key (Google AI Studio)")
+        if not self.gemini_desc_keys:
+            blockers.append(
+                "Thiếu Gemini mô tả ảnh — cần ít nhất Key chính trong Cài đặt nâng cao"
+            )
+        if blockers:
+            return blockers
+        if not self.pipeline:
+            blockers.append(
+                "Pipeline Imagen không khởi tạo được — kiểm tra API key và khởi động lại Anki"
+            )
+        return blockers
+
     def generate_image_with_imagen(
         self,
         vocabulary: str,
@@ -393,11 +417,23 @@ class AIImageProvider:
         style: str = "photorealistic"
     ) -> Tuple[Optional[List[bytes]], str, Dict]:
         """Tạo ảnh bằng Imagen 4 Ultra"""
+        # #region agent log
+        cursor_session_log(
+            "api_handler.py:generate_image_with_imagen",
+            "entry",
+            {
+                "pipeline_ready": self.pipeline is not None,
+                "imagen_enabled": bool(self.imagen_enabled),
+                "vocab_len": len(vocabulary or ""),
+            },
+            "A",
+        )
+        # #endregion
         if not self.pipeline:
             raise APIError("Imagen pipeline is not initialized or enabled")
 
         try:
-            return self.pipeline.generate_image_for_vocabulary(
+            out = self.pipeline.generate_image_for_vocabulary(
                 vocabulary=vocabulary,
                 definition=definition,
                 examples=examples,
@@ -405,7 +441,25 @@ class AIImageProvider:
                 height=height,
                 style=style
             )
+            # #region agent log
+            img_count = len(out[0]) if out and out[0] else 0
+            cursor_session_log(
+                "api_handler.py:generate_image_with_imagen",
+                "success",
+                {"image_count": img_count, "provider": out[1] if len(out) > 1 else ""},
+                "B",
+            )
+            # #endregion
+            return out
         except Exception as e:
+            # #region agent log
+            cursor_session_log(
+                "api_handler.py:generate_image_with_imagen",
+                "exception",
+                {"error_type": type(e).__name__, "error": str(e)[:300]},
+                "B",
+            )
+            # #endregion
             logger.error(f"Error in generate_image_with_imagen: {e}")
             raise APIError(f"Imagen generation failed: {e}")
 

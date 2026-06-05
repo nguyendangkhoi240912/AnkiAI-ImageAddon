@@ -46,6 +46,12 @@ from .providers import (  # noqa: F401
     TenorProvider,
     PixabayAnimatedProvider,
     IconScoutProvider,
+    HPAPIProvider,
+    PotterAPIProvider,
+    WaifuPicsProvider,
+    NekosBestProvider,
+    StudioGhibliAPIProvider,
+    PokeAPIProvider,
 )
 
 logger = logging.getLogger(__name__)
@@ -414,12 +420,14 @@ class SmartImageSelector:
         except Exception as e:
             self.provider_stats[name].record_failure()
             if self.delay_manager:
-                if "429" in str(e) or "503" in str(e):
-                    self.delay_manager.increase_delay(name, 500)
-                elif "timeout" in str(e).lower():
-                    self.delay_manager.increase_delay(name, 200)
+                # BUG-2 FIX: Pass is_rate_limit as keyword bool, not int (500/200/100 were all truthy)
+                e_str = str(e).lower()
+                if "429" in e_str or "503" in e_str:
+                    self.delay_manager.increase_delay(name, is_rate_limit=True)
+                elif "timeout" in e_str:
+                    self.delay_manager.increase_delay(name, is_rate_limit=False)
                 else:
-                    self.delay_manager.increase_delay(name, 100)
+                    self.delay_manager.increase_delay(name, is_rate_limit=False)
             if any(c in str(e).lower() for c in ("429", "503", "403")):
                 self.rate_limiter.handle_rate_limit(name)
             return []

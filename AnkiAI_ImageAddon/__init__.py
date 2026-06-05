@@ -5,14 +5,13 @@ Main entry point cho add-on
 
 from aqt import mw
 from aqt.browser import Browser
-from aqt.qt import QMessageBox, QDialog
+from aqt.qt import QMessageBox, QDialog, QTimer
 import sys
 import os
 import logging
 from typing import Optional
 import re
 import time
-import threading
 import traceback
 def _setup_file_logging() -> logging.Logger:
     """Log to addon/logs/ankiai.log; skip file handler if directory is not writable."""
@@ -57,6 +56,8 @@ from .modules.api_handler import AIImageProvider, APIError
 from .modules.image_handler import ImageHandler, ImageError
 from .modules.bg_handler import BackgroundProcessor, ProcessingTask
 from .modules.features import FeatureDatabase, AdvancedFeatures
+from .modules.debug_log import configure as configure_debug_log, cursor_session_log
+from .modules.http_session_manager import HTTPSessionManager
 
 
 # Global instances
@@ -163,6 +164,24 @@ class AddImageTask(ProcessingTask):
             if generation_mode == "generate":
                 # AI generation mode using Imagen
                 logger.info(f"📌 Generating image using AI for '{vocabulary}'...")
+                # #region agent log
+                cursor_session_log(
+                    "__init__.py:AddImageTask.process_note",
+                    "generate_mode_start",
+                    {
+                        "generation_mode": generation_mode,
+                        "pipeline_ready": getattr(
+                            self.ai_provider, "pipeline", None
+                        )
+                        is not None,
+                        "imagen_enabled": getattr(
+                            self.ai_provider, "imagen_enabled", None
+                        ),
+                        "vocab_preview": (vocabulary or "")[:40],
+                    },
+                    "A",
+                )
+                # #endregion
                 try:
                     images, provider_name, metadata = self.ai_provider.generate_image_with_imagen(
                         vocabulary=vocabulary,
@@ -175,11 +194,51 @@ class AddImageTask(ProcessingTask):
                         )
                     else:
                         success = False
-                        message = "AI không tạo được ảnh (không có dữ liệu trả về)"
+                        meta_err = (metadata or {}).get("error") or ""
+                        if config_manager.get(
+                            "imagen_fallback_to_search_providers", True
+                        ):
+                            try:
+                                image_url = self.ai_provider.get_image_url(
+                                    vocabulary, definition, examples
+                                )
+                                if image_url:
+                                    logger.info(
+                                        "Imagen empty/failed; using search fallback"
+                                    )
+                                    success, message = self.image_handler.process_image(
+                                        image_url,
+                                        note,
+                                        vocabulary,
+                                        self.image_field,
+                                        overwrite=overwrite,
+                                    )
+                                    if success is True:
+                                        message = f"{message} (fallback tìm kiếm)"
+                            except Exception as fb_err:
+                                logger.warning(
+                                    "Search fallback after Imagen failed: %s", fb_err
+                                )
+                        if not success:
+                            if meta_err:
+                                message = f"AI không tạo được ảnh: {meta_err[:220]}"
+                            else:
+                                message = (
+                                    "AI không tạo được ảnh "
+                                    "(không có dữ liệu trả về)"
+                                )
                 except Exception as e:
                     logger.error(f"Imagen generation error: {e}", exc_info=True)
                     success = False
                     message = f"Lỗi tạo ảnh AI: {e}"
+                    # #region agent log
+                    cursor_session_log(
+                        "__init__.py:AddImageTask.process_note",
+                        "generate_mode_exception",
+                        {"error_type": type(e).__name__, "error": str(e)[:300]},
+                        "E",
+                    )
+                    # #endregion
             
             elif generation_mode == "smart":
                 # Smart mode: prefer generated, fallback to search
@@ -269,7 +328,20 @@ class AddImageTask(ProcessingTask):
             else:
                 logger.warning(f"📌 Image processing failed: {message}")
 
-            return self._finalize_result(success, message, vocabulary)
+            final = self._finalize_result(success, message, vocabulary)
+            # #region agent log
+            cursor_session_log(
+                "__init__.py:AddImageTask.process_note",
+                "finalize_result",
+                {
+                    "success_repr": repr(success),
+                    "final_status": repr(final[0]),
+                    "final_msg": str(final[1])[:200],
+                },
+                "E",
+            )
+            # #endregion
+            return final
         
         except APIError as e:
             logger.error(f"API Error: {e}", exc_info=True)
@@ -412,6 +484,25 @@ def _run_batch_processing(
         return
 
     mode_key = config_manager.get("image_generation_mode", "search")
+    if mode_key == "generate":
+        blockers = ai_provider.get_imagen_blockers()
+        if blockers:
+            # #region agent log
+            cursor_session_log(
+                "__init__.py:_run_batch_processing",
+                "imagen_preflight_blocked",
+                {"blockers": blockers},
+                "A",
+                run_id="post-fix",
+            )
+            # #endregion
+            browser_menu_manager.show_error(
+                "Imagen chưa sẵn sàng",
+                "Chế độ Tạo ảnh AI cần:\n\n"
+                + "\n".join(f"• {b}" for b in blockers)
+                + "\n\nMở Config → Cài đặt nâng cao → bật Imagen và điền API key.",
+            )
+            return
     mode_labels = {
         "search": "Tìm kiếm",
         "generate": "Tạo ảnh (Imagen)",
@@ -458,9 +549,12 @@ def _run_batch_processing(
         pending = result.get("pending_note_ids") or []
 
         successful = skipped_results = failed_results = 0
+        first_fail_msg = None
         for r in results:
             if not isinstance(r, tuple) or len(r) < 2:
                 failed_results += 1
+                if first_fail_msg is None:
+                    first_fail_msg = repr(r)[:120]
                 continue
             st = r[0]
             if st is True:
@@ -469,7 +563,23 @@ def _run_batch_processing(
                 skipped_results += 1
             else:
                 failed_results += 1
+                if first_fail_msg is None:
+                    first_fail_msg = str(r[1])[:200]
         failed_results += len(errors)
+        # #region agent log
+        cursor_session_log(
+            "__init__.py:_run_batch_processing.on_success",
+            "batch_summary",
+            {
+                "successful": successful,
+                "skipped": skipped_results,
+                "failed": failed_results,
+                "first_fail_msg": first_fail_msg,
+                "errors": errors[:3] if errors else [],
+            },
+            "E",
+        )
+        # #endregion
 
         meta = batch_meta or {
             "vocabulary_field": vocab_field,
@@ -494,20 +604,21 @@ def _run_batch_processing(
                 f"Bỏ qua: {skipped_results}\n"
                 f"Thất bại: {failed_results}"
             )
+            if first_fail_msg and failed_results:
+                summary += f"\n\nLý do: {first_fail_msg}"
             if pending:
                 summary += f"\n\n⏸ Đã lưu {len(pending)} thẻ — dùng menu «Tiếp tục batch đã dừng»."
             progress_dialog.detail_label.setText(summary)
 
         mw.taskman.run_on_main(_finish_ui)
 
-        def refresh_after_delay():
-            time.sleep(1)
+        def refresh_browser():
             try:
-                mw.taskman.run_on_main(browser.search)
+                browser.search()
             except Exception:
                 pass
 
-        threading.Thread(target=refresh_after_delay, daemon=True).start()
+        QTimer.singleShot(1000, refresh_browser)
 
     def on_error(error_msg):
         def _error_ui():
@@ -634,8 +745,6 @@ def on_config_changed(new_config):
     global config_manager
     if config_manager is not None:
         config_manager.config = new_config
-        from .modules.debug_log import configure as configure_debug_log
-
         configure_debug_log(
             enabled=bool(new_config.get("enable_agent_debug_log", False)),
         )
@@ -651,8 +760,6 @@ def setup_addon():
     try:
         # Khởi tạo các components
         config_manager = get_config_manager()
-        from .modules.debug_log import configure as configure_debug_log
-
         configure_debug_log(
             enabled=bool(config_manager.get("enable_agent_debug_log", False)),
         )
@@ -694,19 +801,17 @@ def cleanup_addon():
     try:
         # 🚀 v4.5: Close all image provider sessions (global session manager)
         try:
-            from .modules.image_providers import _ImageProviderSessionManager
+            from .modules.providers.base import _ImageProviderSessionManager
             _ImageProviderSessionManager.close_all()
             logger.info("[ADDON] Image provider sessions closed (20-30% resource savings)")
         except Exception as e:
             logger.error(f"[ADDON] Warning: Could not close image provider sessions: {e}")
-        
-        # Close HTTP session if image handler exists
-        if image_handler and hasattr(image_handler, 'session'):
-            try:
-                image_handler.session.close()
-            except Exception:
-                logger.debug("[ADDON] Could not close HTTP session")
-            logger.info("[ADDON] HTTP session closed")
+
+        try:
+            HTTPSessionManager.close_all()
+            logger.info("[ADDON] Central HTTP sessions closed")
+        except Exception as e:
+            logger.error(f"[ADDON] Warning: Could not close central HTTP sessions: {e}")
         
         # Stop background processor if running
         if bg_processor and hasattr(bg_processor, 'cancel'):
@@ -714,7 +819,8 @@ def cleanup_addon():
             logger.info("[ADDON] Background processor stopped")
         
         # Close feature database
-        if feature_db and hasattr(feature_db, 'db_path'):
+        if feature_db and hasattr(feature_db, 'close'):
+            feature_db.close()
             logger.info("[ADDON] Feature database closed")
         
         # Clear references

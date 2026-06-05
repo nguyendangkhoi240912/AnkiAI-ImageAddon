@@ -10,6 +10,7 @@ Advanced Features Module v4.5
 
 import json
 import logging
+import threading
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -30,12 +31,24 @@ class FeatureDatabase:
             anki_collection_path: Path to Anki collection folder
         """
         self.db_path = Path(anki_collection_path) / "AnkiAI_features.db"
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self.init_database()
+
+    def close(self):
+        """Close the persistent feature database connection."""
+        with self._lock:
+            if self._conn:
+                self._conn.close()
+                self._conn = None
     
     def init_database(self):
         """Initialize database schema if not exists"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
+        with self._lock:
+            cursor = self._conn.cursor()
             
             # Image history table
             cursor.execute("""
@@ -100,18 +113,18 @@ class FeatureDatabase:
                 )
             """)
             
-            conn.commit()
+            self._conn.commit()
     
     def add_image_to_history(self, note_id: int, image_url: str, provider: str, field_name: str) -> bool:
         """Record image addition in history"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with self._lock:
+                cursor = self._conn.cursor()
                 cursor.execute("""
                     INSERT INTO image_history (note_id, image_url, provider, added_timestamp, field_name)
                     VALUES (?, ?, ?, ?, ?)
                 """, (note_id, image_url, provider, datetime.now(), field_name))
-                conn.commit()
+                self._conn.commit()
                 return True
         except Exception as e:
             logger.warning(f"Failed to add to history: {e}")
@@ -120,14 +133,14 @@ class FeatureDatabase:
     def remove_image_from_history(self, note_id: int, image_url: str) -> bool:
         """Mark image as removed (soft delete for undo)"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with self._lock:
+                cursor = self._conn.cursor()
                 cursor.execute("""
                     UPDATE image_history 
                     SET status = 'removed' 
                     WHERE note_id = ? AND image_url = ?
                 """, (note_id, image_url))
-                conn.commit()
+                self._conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:
             logger.warning(f"Failed to remove from history: {e}")
@@ -136,9 +149,8 @@ class FeatureDatabase:
     def get_image_history(self, note_id: int, limit: int = 10) -> List[Dict]:
         """Get image history for a note"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
+            with self._lock:
+                cursor = self._conn.cursor()
                 cursor.execute("""
                     SELECT * FROM image_history 
                     WHERE note_id = ? AND status = 'active'
@@ -153,8 +165,8 @@ class FeatureDatabase:
     def update_provider_stats(self, provider: str, response_time_ms: int, success: bool):
         """Update provider performance statistics"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with self._lock:
+                cursor = self._conn.cursor()
                 
                 # Check if exists
                 cursor.execute("SELECT id FROM provider_stats WHERE provider_name = ?", (provider,))
@@ -177,7 +189,7 @@ class FeatureDatabase:
                         VALUES (?, 1, ?, ?)
                     """, (provider, 1 if success else 0, datetime.now()))
                 
-                conn.commit()
+                self._conn.commit()
                 return True
         except Exception as e:
             logger.warning(f"Failed to update provider stats: {e}")
@@ -186,9 +198,8 @@ class FeatureDatabase:
     def get_provider_report(self) -> Dict[str, Dict]:
         """Get performance report for all providers"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
+            with self._lock:
+                cursor = self._conn.cursor()
                 cursor.execute("SELECT * FROM provider_stats ORDER BY reliability_score DESC")
                 
                 report = {}
@@ -209,9 +220,8 @@ class FeatureDatabase:
         try:
             from datetime import date
             
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
+            with self._lock:
+                cursor = self._conn.cursor()
                 cursor.execute("""
                     SELECT * FROM session_stats 
                     WHERE session_date = ?
@@ -235,8 +245,8 @@ class FeatureDatabase:
         try:
             from datetime import date
             
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with self._lock:
+                cursor = self._conn.cursor()
                 today = date.today()
                 
                 # Check if session exists
@@ -259,7 +269,7 @@ class FeatureDatabase:
                         VALUES (?, ?, ?, ?, ?)
                     """, (today, successful + failed, successful, failed, time_ms))
                 
-                conn.commit()
+                self._conn.commit()
                 return True
         except Exception as e:
             logger.warning(f"Failed to update session stats: {e}")
@@ -268,14 +278,14 @@ class FeatureDatabase:
     def save_custom_prompt(self, name: str, prompt_text: str) -> bool:
         """Save a custom evaluation prompt"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with self._lock:
+                cursor = self._conn.cursor()
                 cursor.execute("""
                     INSERT OR REPLACE INTO custom_prompts 
                     (name, prompt_text, created_timestamp, is_active)
                     VALUES (?, ?, ?, 1)
                 """, (name, prompt_text, datetime.now()))
-                conn.commit()
+                self._conn.commit()
                 return True
         except Exception as e:
             logger.warning(f"Failed to save prompt: {e}")
@@ -284,9 +294,8 @@ class FeatureDatabase:
     def get_custom_prompts(self) -> List[Dict]:
         """Get all active custom prompts"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
+            with self._lock:
+                cursor = self._conn.cursor()
                 cursor.execute("""
                     SELECT * FROM custom_prompts 
                     WHERE is_active = 1
@@ -300,15 +309,15 @@ class FeatureDatabase:
     def enable_scheduled_task(self, task_type: str, schedule: str, deck_names: List[str]) -> bool:
         """Enable a scheduled task (sync-based auto-add)"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with self._lock:
+                cursor = self._conn.cursor()
                 deck_str = ",".join(deck_names)
                 cursor.execute("""
                     INSERT OR REPLACE INTO scheduled_tasks 
                     (task_type, schedule, is_enabled, deck_names)
                     VALUES (?, ?, 1, ?)
                 """, (task_type, schedule, deck_str))
-                conn.commit()
+                self._conn.commit()
                 return True
         except Exception as e:
             logger.warning(f"Failed to enable task: {e}")
@@ -317,9 +326,8 @@ class FeatureDatabase:
     def get_scheduled_tasks(self) -> List[Dict]:
         """Get all enabled scheduled tasks"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
+            with self._lock:
+                cursor = self._conn.cursor()
                 cursor.execute("SELECT * FROM scheduled_tasks WHERE is_enabled = 1")
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
