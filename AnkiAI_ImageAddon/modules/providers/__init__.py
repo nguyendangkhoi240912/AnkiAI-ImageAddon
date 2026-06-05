@@ -37,6 +37,14 @@ from .animated import (
     PixabayAnimatedProvider,
     IconScoutProvider,
 )
+from .entertainment import (
+    HPAPIProvider,
+    PotterAPIProvider,
+    WaifuPicsProvider,
+    NekosBestProvider,
+    StudioGhibliAPIProvider,
+    PokeAPIProvider,
+)
 
 __all__ = [
     "ImageProviderError",
@@ -70,4 +78,10 @@ __all__ = [
     "TenorProvider",
     "PixabayAnimatedProvider",
     "IconScoutProvider",
+    "HPAPIProvider",
+    "PotterAPIProvider",
+    "WaifuPicsProvider",
+    "NekosBestProvider",
+    "StudioGhibliAPIProvider",
+    "PokeAPIProvider",
 ]

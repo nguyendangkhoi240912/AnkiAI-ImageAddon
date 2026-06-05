@@ -22,6 +22,13 @@ from aqt.qt import (
 )
 from typing import List, Optional, Callable, Dict, Any
 from .ui_theme import apply_dialog_theme
+from .ui_widgets import (
+    make_settings_card,
+    card_header,
+    field_row,
+    password_field,
+    section_spacer,
+)
 import functools
 import logging
 import requests
@@ -326,258 +333,236 @@ class ConfigDialog(QDialog):
         self.load_existing_config()
     
     def init_ui(self):
-        """Tạo giao diện config"""
-        from aqt.qt import QLineEdit, QCheckBox, QScrollArea
+        """Tạo giao diện config — dark theme, card layout."""
+        from aqt.qt import QLineEdit, QCheckBox, QScrollArea, QWidget, QFrame
 
         apply_dialog_theme(self)
         self.setWindowTitle("AnkiAI v5.1 — Cài đặt")
-        self.setMinimumWidth(650)
-        self.setMinimumHeight(850)
-        
+        self.setMinimumWidth(680)
+        self.setMinimumHeight(720)
+
         main_layout = QVBoxLayout()
-        
-        # Tạo scroll area để chứa tất cả fields
+        main_layout.setContentsMargins(20, 18, 20, 16)
+        main_layout.setSpacing(12)
+
+        header = QLabel("AnkiAI v5.1 — Cài đặt")
+        header.setProperty("heading", True)
+        main_layout.addWidget(header)
+        rule = QFrame()
+        rule.setObjectName("headerRule")
+        rule.setFrameShape(QFrame.Shape.HLine)
+        main_layout.addWidget(rule)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll_widget = QVBoxLayout()
-        
-        # ✨ NEW v5.0: Image Generation Mode
-        scroll_widget.addWidget(QLabel("🎨 Chế độ hoạt động chính (Image Generation Mode):"))
+        scroll_body = QWidget()
+        scroll_layout = QVBoxLayout(scroll_body)
+        scroll_layout.setContentsMargins(4, 8, 4, 8)
+        scroll_layout.setSpacing(14)
+
+        # —— Card 1: Chế độ hoạt động ——
+        c1, l1 = make_settings_card()
+        l1.addWidget(card_header("🎨", "Chế độ hoạt động"))
+        l1.addWidget(
+            field_row(
+                "Chế độ chính",
+                "Search: tìm ảnh nhanh. Generate: Imagen. Smart: ưu tiên AI, fallback tìm kiếm.",
+            )
+        )
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem("Tìm kiếm ảnh thông thường (Search Mode)", "search")
-        self.mode_combo.addItem("Tạo ảnh bằng AI độc nhất (AI Generation Mode - Imagen)", "generate")
-        self.mode_combo.addItem("Tự động thông minh (Smart Selection Mode)", "smart")
-        self.mode_combo.setToolTip("Chọn cách hoạt động: Tìm kiếm từ các nguồn có sẵn hoặc tự động tạo ảnh bằng AI Imagen 4 Ultra.")
-        scroll_widget.addWidget(self.mode_combo)
-        
-        # AI Providers (v4.2 - Multi-key Gemini)
-        scroll_widget.addWidget(QLabel("\n🤖 AI Providers cho Từ khóa & Định nghĩa (cấu hình ít nhất một):"))
-        
-        # Groq API Key
-        scroll_widget.addWidget(QLabel("Groq API Key (⭐ Nên dùng - siêu nhanh, miễn phí):"))
-        self.groq_input = QLineEdit()
-        self.groq_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.groq_input.setPlaceholderText("Get from: console.groq.com/keys")
-        scroll_widget.addWidget(self.groq_input)
-        
-        # ✨ Gemini API Keys (v4.2 - 4 keys for multi-key fallback architecture)
-        scroll_widget.addWidget(QLabel("\n🔑 Gemini API Keys (Multi-key Architecture - v4.2):"))
-        
-        scroll_widget.addWidget(QLabel("Gemini API Key #1 (⭐ Keyword Generator - Primary):"))
-        self.gemini_input = QLineEdit()
-        self.gemini_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.gemini_input.setPlaceholderText("Get from: makersuite.google.com/app/apikey (Key #1 - keyword generation)")
-        scroll_widget.addWidget(self.gemini_input)
-        
-        scroll_widget.addWidget(QLabel("Gemini API Key #2 (tuỳ chọn - Backup for Keyword Gen):"))
-        self.gemini_backup_input = QLineEdit()
-        self.gemini_backup_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.gemini_backup_input.setPlaceholderText("Get from: makersuite.google.com/app/apikey (Key #2 - backup)")
-        scroll_widget.addWidget(self.gemini_backup_input)
-        
-        scroll_widget.addWidget(QLabel("Gemini API Key #3 (tuỳ chọn - Backup for Keyword Gen):"))
-        self.gemini_keyword_backup_input = QLineEdit()
-        self.gemini_keyword_backup_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.gemini_keyword_backup_input.setPlaceholderText("Get from: makersuite.google.com/app/apikey (backup for keyword gen)")
-        scroll_widget.addWidget(self.gemini_keyword_backup_input)
-        
-        # Ollama Checkbox
-        scroll_widget.addWidget(QLabel("\nOllama (Local backup - hoàn toàn miễn phí):"))
+        self.mode_combo.addItem("Tìm kiếm ảnh (Search)", "search")
+        self.mode_combo.addItem("Tạo ảnh AI (Imagen)", "generate")
+        self.mode_combo.addItem("Thông minh (Smart)", "smart")
+        self.mode_combo.setToolTip("Cách addon lấy ảnh cho mỗi thẻ.")
+        l1.addWidget(self.mode_combo)
+        scroll_layout.addWidget(c1)
+
+        # —— Card 2: Nhà cung cấp AI ——
+        c2, l2 = make_settings_card()
+        l2.addWidget(card_header("🤖", "Nhà cung cấp AI"))
+        l2.addWidget(
+            field_row(
+                "Groq API Key",
+                "Nhanh, miễn phí — dùng để tạo từ khóa tìm ảnh.",
+                badge="recommended",
+            )
+        )
+        self.groq_input = password_field("console.groq.com/keys")
+        l2.addWidget(self.groq_input)
+
+        l2.addWidget(section_spacer())
+        l2.addWidget(
+            field_row(
+                "Gemini Key #1",
+                "Key chính để tạo từ khóa và ngữ cảnh tìm kiếm.",
+                badge="priority",
+            )
+        )
+        self.gemini_input = password_field("aistudio.google.com/apikey")
+        l2.addWidget(self.gemini_input)
+
+        l2.addWidget(field_row("Gemini Key #2", "Dự phòng 1 khi key #1 bị giới hạn."))
+        self.gemini_backup_input = password_field("Tùy chọn")
+        l2.addWidget(self.gemini_backup_input)
+
+        l2.addWidget(field_row("Gemini Key #3", "Dự phòng 2 cho tạo từ khóa."))
+        self.gemini_keyword_backup_input = password_field("Tùy chọn")
+        l2.addWidget(self.gemini_keyword_backup_input)
+
+        l2.addWidget(section_spacer())
+        ollama_row = QHBoxLayout()
         self.ollama_checkbox = QCheckBox("Sử dụng Ollama local")
-        self.ollama_checkbox.setToolTip("Chạy trên máy của bạn, không cần internet. Yêu cầu: ollama pull mistral")
-        scroll_widget.addWidget(self.ollama_checkbox)
-        
+        self.ollama_checkbox.setToolTip("Chạy trên máy — ollama pull mistral")
+        ollama_row.addWidget(self.ollama_checkbox)
+        ollama_row.addStretch()
+        l2.addLayout(ollama_row)
+        l2.addWidget(field_row("Địa chỉ Ollama", "Máy chủ local mặc định."))
         self.ollama_url_input = QLineEdit()
         self.ollama_url_input.setText("http://localhost:11434")
-        self.ollama_url_input.setPlaceholderText("URL của Ollama server")
-        scroll_widget.addWidget(self.ollama_url_input)
-        
-        # ✨ Image Search Providers (15+ sources - v4.2)
-        scroll_widget.addWidget(QLabel("\n📷 Image Search Providers (Cấu hình ít nhất một nếu dùng Search Mode):"))
-        
-        scroll_widget.addWidget(QLabel("Pexels API Key (⭐ Nên cấu hình - nhanh, chất lượng cao):"))
-        self.pexels_input = QLineEdit()
-        self.pexels_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.pexels_input.setPlaceholderText("Get from: pexels.com/api")
-        scroll_widget.addWidget(self.pexels_input)
-        
-        scroll_widget.addWidget(QLabel("Unsplash API Key (tuỳ chọn):"))
-        self.unsplash_input = QLineEdit()
-        self.unsplash_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.unsplash_input.setPlaceholderText("Get from: unsplash.com/developers")
-        scroll_widget.addWidget(self.unsplash_input)
-        
-        scroll_widget.addWidget(QLabel("Pixabay API Key (⭐ Khuyến nghị - Miễn phí, chất lượng cao):"))
-        self.pixabay_input = QLineEdit()
-        self.pixabay_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.pixabay_input.setPlaceholderText("Get from: pixabay.com/api")
-        scroll_widget.addWidget(self.pixabay_input)
-        
-        scroll_widget.addWidget(QLabel("Europeana API Key (tuỳ chọn - v4.2):"))
-        self.europeana_input = QLineEdit()
-        self.europeana_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.europeana_input.setPlaceholderText("Get from: pro.europeana.eu/page/apis")
-        scroll_widget.addWidget(self.europeana_input)
-        
-        # ✨ NEW v5.0: GIF / Animated Image Providers
-        scroll_widget.addWidget(QLabel("\n🎬 Animated GIF & Icon Providers (Cấu hình tùy chọn cho ảnh động):"))
-        
-        scroll_widget.addWidget(QLabel("KLIPY App Key (⭐ Nên dùng cho ảnh động - Free):"))
-        self.klipy_input = QLineEdit()
-        self.klipy_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.klipy_input.setPlaceholderText("Get from: klipy.ai / api.klipy.ai")
-        scroll_widget.addWidget(self.klipy_input)
-        
-        scroll_widget.addWidget(QLabel("GIPHY API Key (Beta key cho ảnh động):"))
-        self.giphy_input = QLineEdit()
-        self.giphy_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.giphy_input.setPlaceholderText("Get from: developers.giphy.com")
-        scroll_widget.addWidget(self.giphy_input)
-        
-        scroll_widget.addWidget(QLabel("Tenor API Key (Sẽ hết hạn sau 30/06/2026):"))
-        self.tenor_input = QLineEdit()
-        self.tenor_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.tenor_input.setPlaceholderText("Get from: Google Cloud Console")
-        scroll_widget.addWidget(self.tenor_input)
-        
-        scroll_widget.addWidget(QLabel("IconScout API Token (Cho Animated Icons):"))
-        self.iconscout_input = QLineEdit()
-        self.iconscout_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.iconscout_input.setPlaceholderText("Get from: iconscout.com/api")
-        scroll_widget.addWidget(self.iconscout_input)
-        
-        # 🆕 v4.4: Gemini Image Evaluator - 7 API keys with auto-failover
-        scroll_widget.addWidget(QLabel("\n🎯 Gemini Image Evaluator (7 API Keys - Auto Failover v4.4):"))
-        
-        # Enable checkbox
-        self.enable_ai_eval_checkbox = QCheckBox("Sử dụng Gemini Vision để đánh giá & chọn ảnh tốt nhất")
-        self.enable_ai_eval_checkbox.setToolTip("Gemini sẽ so sánh các ảnh candidate và chọn ảnh phù hợp nhất (kích hoạt khi cấu hình ít nhất 1 API key)")
+        l2.addWidget(self.ollama_url_input)
+        scroll_layout.addWidget(c2)
+
+        # —— Card 3: Tìm kiếm hình ảnh ——
+        c3, l3 = make_settings_card()
+        l3.addWidget(card_header("📷", "Dịch vụ tìm kiếm hình ảnh"))
+        l3.addWidget(
+            field_row("Pexels", "Ảnh stock chất lượng cao.", badge="recommended")
+        )
+        self.pexels_input = password_field("pexels.com/api")
+        l3.addWidget(self.pexels_input)
+
+        l3.addWidget(field_row("Pixabay", "Miễn phí, phù hợp flashcard.", badge="recommended"))
+        self.pixabay_input = password_field("pixabay.com/api")
+        l3.addWidget(self.pixabay_input)
+
+        l3.addWidget(field_row("Unsplash", "Tùy chọn — bộ sưu tập lớn."))
+        self.unsplash_input = password_field("unsplash.com/developers")
+        l3.addWidget(self.unsplash_input)
+
+        l3.addWidget(field_row("Europeana", "Di sản văn hóa châu Âu — tùy chọn."))
+        self.europeana_input = password_field("pro.europeana.eu")
+        l3.addWidget(self.europeana_input)
+
+        l3.addWidget(section_spacer())
+        l3.addWidget(card_header("🎬", "Ảnh động / GIF"))
+        l3.addWidget(field_row("KLIPY", "GIF có hỗ trợ localization.", badge="recommended"))
+        self.klipy_input = password_field("klipy.io/developers")
+        l3.addWidget(self.klipy_input)
+        l3.addWidget(field_row("GIPHY", "Thư viện GIF lớn."))
+        self.giphy_input = password_field("developers.giphy.com")
+        l3.addWidget(self.giphy_input)
+        l3.addWidget(field_row("Tenor", "Hết hạn API dự kiến 30/06/2026."))
+        self.tenor_input = password_field("Google Cloud Console")
+        l3.addWidget(self.tenor_input)
+        l3.addWidget(field_row("IconScout", "Icon và Lottie động."))
+        self.iconscout_input = password_field("iconscout.com/api")
+        l3.addWidget(self.iconscout_input)
+        scroll_layout.addWidget(c3)
+
+        # —— Card 4: Nâng cao ——
+        c4, l4 = make_settings_card()
+        l4.addWidget(card_header("⚙️", "Cài đặt nâng cao"))
+
+        self.enable_ai_eval_checkbox = QCheckBox(
+            "Gemini Vision — chọn ảnh tốt nhất trong các ứng viên"
+        )
         self.enable_ai_eval_checkbox.setChecked(True)
-        scroll_widget.addWidget(self.enable_ai_eval_checkbox)
-        
-        # Create 7 input fields for Gemini eval API keys
+        l4.addWidget(self.enable_ai_eval_checkbox)
+
         self.gemini_eval_inputs = []
+        _eval_hints = [
+            "Key đầu tiên dùng để đánh giá ảnh.",
+            "Backup khi key #1 bị giới hạn.",
+            "Backup #2", "Backup #3", "Backup #4", "Backup #5", "Backup #6",
+        ]
         for i in range(1, 8):
-            label = QLabel(f"Gemini Eval API Key #{i} (Sẽ dùng làm backup nếu #{i-1} bị khoá):")
-            input_field = QLineEdit()
-            input_field.setEchoMode(QLineEdit.EchoMode.Password)
-            input_field.setPlaceholderText(f"API key #{i} - Leave blank if not needed")
-            scroll_widget.addWidget(label)
-            scroll_widget.addWidget(input_field)
-            self.gemini_eval_inputs.append(input_field)
-            
-        # 🆕 v5.0: AI Image Generation (Google Imagen 4 Ultra)
-        scroll_widget.addWidget(QLabel("\n🔮 AI Image Generation (Google Imagen 4 Ultra):"))
-        
-        self.enable_imagen_checkbox = QCheckBox("Kích hoạt tự động tạo ảnh bằng AI Imagen 4 Ultra")
-        self.enable_imagen_checkbox.setToolTip("Sử dụng Imagen 4 Ultra để tự sinh ảnh độc nhất dựa trên từ vựng")
-        scroll_widget.addWidget(self.enable_imagen_checkbox)
-        
-        scroll_widget.addWidget(QLabel("Imagen API Key (Google AI Studio Key):"))
-        self.imagen_api_key_input = QLineEdit()
-        self.imagen_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.imagen_api_key_input.setPlaceholderText("Get from: aistudio.google.com")
-        scroll_widget.addWidget(self.imagen_api_key_input)
-        
-        self.enable_gemini_desc_checkbox = QCheckBox("Sử dụng Gemini để tự động viết mô tả ảnh chi tiết (Prompt Guide)")
-        self.enable_gemini_desc_checkbox.setToolTip("Gemini sẽ tự động phân tích nghĩa và ví dụ để viết Prompt Guide chi tiết gửi sang Imagen.")
+            badge = "priority" if i == 1 else ""
+            l4.addWidget(field_row(f"Gemini Eval Key #{i}", _eval_hints[i - 1], badge=badge))
+            inp = password_field("Để trống nếu không dùng")
+            l4.addWidget(inp)
+            self.gemini_eval_inputs.append(inp)
+
+        l4.addWidget(section_spacer())
+        l4.addWidget(card_header("🔮", "Tạo ảnh Imagen"))
+        self.enable_imagen_checkbox = QCheckBox("Bật tạo ảnh bằng Imagen")
+        l4.addWidget(self.enable_imagen_checkbox)
+        l4.addWidget(field_row("Imagen API Key", "Google AI Studio."))
+        self.imagen_api_key_input = password_field("aistudio.google.com")
+        l4.addWidget(self.imagen_api_key_input)
+
+        self.enable_gemini_desc_checkbox = QCheckBox(
+            "Gemini viết mô tả chi tiết (prompt) cho Imagen"
+        )
         self.enable_gemini_desc_checkbox.setChecked(True)
-        scroll_widget.addWidget(self.enable_gemini_desc_checkbox)
-        
-        scroll_widget.addWidget(QLabel("Gemini Description API Key (Primary):"))
-        self.gemini_desc_input = QLineEdit()
-        self.gemini_desc_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.gemini_desc_input.setPlaceholderText("Get from: aistudio.google.com")
-        scroll_widget.addWidget(self.gemini_desc_input)
-        
-        scroll_widget.addWidget(QLabel("Gemini Description API Key (Backup 1):"))
-        self.gemini_desc_backup1_input = QLineEdit()
-        self.gemini_desc_backup1_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.gemini_desc_backup1_input.setPlaceholderText("Leave blank if not needed")
-        scroll_widget.addWidget(self.gemini_desc_backup1_input)
-        
-        scroll_widget.addWidget(QLabel("Gemini Description API Key (Backup 2):"))
-        self.gemini_desc_backup2_input = QLineEdit()
-        self.gemini_desc_backup2_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.gemini_desc_backup2_input.setPlaceholderText("Leave blank if not needed")
-        scroll_widget.addWidget(self.gemini_desc_backup2_input)
-        
-        scroll_widget.addWidget(QLabel("Phong cách ảnh mặc định (Default Style):"))
+        l4.addWidget(self.enable_gemini_desc_checkbox)
+        l4.addWidget(field_row("Gemini mô tả ảnh — Key chính", badge="priority"))
+        self.gemini_desc_input = password_field("aistudio.google.com")
+        l4.addWidget(self.gemini_desc_input)
+        l4.addWidget(field_row("Gemini mô tả — Backup 1"))
+        self.gemini_desc_backup1_input = password_field("Tùy chọn")
+        l4.addWidget(self.gemini_desc_backup1_input)
+        l4.addWidget(field_row("Gemini mô tả — Backup 2"))
+        self.gemini_desc_backup2_input = password_field("Tùy chọn")
+        l4.addWidget(self.gemini_desc_backup2_input)
+
+        l4.addWidget(field_row("Phong cách mặc định"))
         self.imagen_style_combo = QComboBox()
-        self.imagen_style_combo.addItems(["photorealistic", "illustration", "cartoon", "painting", "3d"])
-        scroll_widget.addWidget(self.imagen_style_combo)
-        
-        scroll_widget.addWidget(QLabel("Kích thước ảnh mặc định (Default Size):"))
+        self.imagen_style_combo.addItems(
+            ["photorealistic", "illustration", "cartoon", "painting", "3d"]
+        )
+        l4.addWidget(self.imagen_style_combo)
+        l4.addWidget(field_row("Kích thước mặc định"))
         self.imagen_size_combo = QComboBox()
         self.imagen_size_combo.addItems(["1024x1024", "512x512", "256x256", "1536x1536"])
-        scroll_widget.addWidget(self.imagen_size_combo)
-        
-        self.imagen_fallback_checkbox = QCheckBox("Tự động chuyển về tìm kiếm (Search Fallback) nếu sinh ảnh lỗi")
+        l4.addWidget(self.imagen_size_combo)
+        self.imagen_fallback_checkbox = QCheckBox(
+            "Fallback sang tìm kiếm nếu Imagen lỗi"
+        )
         self.imagen_fallback_checkbox.setChecked(True)
-        scroll_widget.addWidget(self.imagen_fallback_checkbox)
-        
-        # ✨ NEW v4.2 Rate Limit Protection
-        scroll_widget.addWidget(QLabel("\n⚡ Rate Limit Protection (v4.2):"))
-        self.enable_rate_limit_checkbox = QCheckBox("Bật tính năng tự động dừng khi chạm giới hạn API")
-        self.enable_rate_limit_checkbox.setToolTip("Nếu API trả về 429/503, hệ thống sẽ tự động dừng 60 giây rồi tiếp tục")
+        l4.addWidget(self.imagen_fallback_checkbox)
+
+        l4.addWidget(section_spacer())
+        self.enable_rate_limit_checkbox = QCheckBox(
+            "Tự dừng khi API trả về rate limit (429)"
+        )
         self.enable_rate_limit_checkbox.setChecked(True)
-        scroll_widget.addWidget(self.enable_rate_limit_checkbox)
-        
-        scroll_widget.addWidget(QLabel("Thời gian tạm dừng (giây - v4.2):"))
+        l4.addWidget(self.enable_rate_limit_checkbox)
+        l4.addWidget(field_row("Thời gian tạm dừng (giây)"))
         self.rate_limit_pause_input = QLineEdit()
         self.rate_limit_pause_input.setText("60")
-        self.rate_limit_pause_input.setPlaceholderText("Default: 60 seconds")
-        scroll_widget.addWidget(self.rate_limit_pause_input)
-        
-        # ✨ NEW v5.1 Skip Existing Images
-        scroll_widget.addWidget(QLabel("\n⚙️ Tùy chọn xử lý ảnh (v5.1):"))
-        self.skip_existing_images_checkbox = QCheckBox("Tự động bỏ qua các thẻ đã có ảnh sẵn")
-        self.skip_existing_images_checkbox.setToolTip("Nếu bật, các thẻ đã có sẵn hình ảnh trong field Ảnh sẽ được tự động bỏ qua để tránh ghi đè.")
+        l4.addWidget(self.rate_limit_pause_input)
+
+        self.skip_existing_images_checkbox = QCheckBox(
+            "Bỏ qua thẻ đã có ảnh trong field"
+        )
         self.skip_existing_images_checkbox.setChecked(True)
-        scroll_widget.addWidget(self.skip_existing_images_checkbox)
-        
-        # Test Buttons
-        test_ai_button = QPushButton("🔌 Test AI Connections")
+        l4.addWidget(self.skip_existing_images_checkbox)
+
+        l4.addWidget(section_spacer())
+        test_row = QHBoxLayout()
+        test_ai_button = QPushButton("Kiểm tra AI")
         test_ai_button.clicked.connect(self.test_connection)
-        scroll_widget.addWidget(test_ai_button)
-        
-        test_image_button = QPushButton("🖼️ Test Image Providers")
+        test_image_button = QPushButton("Kiểm tra nguồn ảnh")
         test_image_button.clicked.connect(self.test_image_providers)
-        scroll_widget.addWidget(test_image_button)
-        
-        # Set scroll content - FIXED: Simple and clean approach
-        scroll_widget.addStretch()
-        scroll_container = QVBoxLayout()
-        scroll_container.setContentsMargins(0, 0, 0, 0)
-        scroll_container.addLayout(scroll_widget)
-        
-        scroll_inner_widget = QVBoxLayout()
-        scroll_inner_widget.setContentsMargins(10, 10, 10, 10)
-        scroll_inner_widget.addLayout(scroll_container)
-        
-        scroll_content_widget = QVBoxLayout()
-        scroll_content_widget.setContentsMargins(0, 0, 0, 0)
-        scroll_content_widget.addLayout(scroll_inner_widget)
-        
-        # Create widget for scroll area
-        scroll_widget_final = QWidget()
-        scroll_widget_final.setLayout(scroll_content_widget)
-        
-        scroll.setWidget(scroll_widget_final)
-        main_layout.addWidget(scroll)
-        
-        # OK/Cancel
+        test_row.addWidget(test_ai_button)
+        test_row.addWidget(test_image_button)
+        l4.addLayout(test_row)
+        scroll_layout.addWidget(c4)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_body)
+        main_layout.addWidget(scroll, stretch=1)
+
         button_layout = QHBoxLayout()
-        ok_button = QPushButton("💾 Lưu")
-        cancel_button = QPushButton("❌ Hủy")
-        
-        ok_button.clicked.connect(self.accept)
+        cancel_button = QPushButton("Hủy")
+        ok_button = QPushButton("Lưu cấu hình")
+        ok_button.setProperty("primary", True)
         cancel_button.clicked.connect(self.reject)
-        
-        button_layout.addWidget(ok_button)
+        ok_button.clicked.connect(self.accept)
+        button_layout.addStretch()
         button_layout.addWidget(cancel_button)
+        button_layout.addWidget(ok_button)
         main_layout.addLayout(button_layout)
-        
         self.setLayout(main_layout)
     
     def load_existing_config(self):
@@ -738,6 +723,10 @@ class ConfigDialog(QDialog):
         enable_imagen = self.enable_imagen_checkbox.isChecked()
         imagen_key = self.imagen_api_key_input.text().strip()
         enable_gemini_desc = self.enable_gemini_desc_checkbox.isChecked()
+        # Chế độ Generate bắt buộc bật Imagen + mô tả Gemini
+        if mode == "generate":
+            enable_imagen = True
+            enable_gemini_desc = True
         gemini_desc_key = self.gemini_desc_input.text().strip()
         gemini_desc_backup1 = self.gemini_desc_backup1_input.text().strip()
         gemini_desc_backup2 = self.gemini_desc_backup2_input.text().strip()
@@ -1032,20 +1021,20 @@ class ConfigDialog(QDialog):
         <html>
         <head>
             <style>
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 10px; background: #f5f5f5; }
-                .header { font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #333; }
-                .provider { display: flex; align-items: center; padding: 10px; margin: 8px 0; border-radius: 8px; background: white; border-left: 4px solid #ddd; }
-                .provider.ok { border-left-color: #4CAF50; background: #f1f8f4; }
-                .provider.error { border-left-color: #f44336; background: #fef5f5; }
-                .provider.optional { border-left-color: #FFC107; background: #fffbf0; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 10px; background: #161625; color: #F0F0F0; }
+                .header { font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #14b8a6; }
+                .provider { display: flex; align-items: center; padding: 10px; margin: 8px 0; border-radius: 8px; background: #202035; border-left: 4px solid #3F3F3F; }
+                .provider.ok { border-left-color: #14b8a6; background: #1a2e2c; }
+                .provider.error { border-left-color: #f87171; background: #2a1a1a; }
+                .provider.optional { border-left-color: #D4AF37; background: #252218; }
                 .icon { font-size: 20px; width: 30px; margin-right: 10px; }
                 .info { flex: 1; }
-                .name { font-weight: bold; color: #333; margin-bottom: 3px; }
-                .status { font-size: 12px; color: #666; }
-                .status.ok { color: #4CAF50; font-weight: bold; }
-                .status.error { color: #f44336; font-weight: bold; }
-                .status.optional { color: #FF9800; }
-                .desc { font-size: 11px; color: #999; margin-top: 4px; }
+                .name { font-weight: bold; color: #F0F0F0; margin-bottom: 3px; }
+                .status { font-size: 12px; color: #A0A0A0; }
+                .status.ok { color: #5eead4; font-weight: bold; }
+                .status.error { color: #f87171; font-weight: bold; }
+                .status.optional { color: #D4AF37; }
+                .desc { font-size: 11px; color: #A0A0A0; margin-top: 4px; }
             </style>
         </head>
         <body>
@@ -1075,21 +1064,19 @@ class ConfigDialog(QDialog):
         
         # Show in custom dialog
         dialog = QDialog(self)
-        dialog.setWindowTitle("AnkiAI - Provider Status")
-        dialog.setGeometry(100, 100, 500, 400)
-        
+        apply_dialog_theme(dialog)
+        dialog.setWindowTitle("AnkiAI — Trạng thái nguồn ảnh")
+        dialog.setGeometry(100, 100, 520, 420)
+
         layout = QVBoxLayout()
-        
         browser = QTextBrowser()
         browser.setHtml(html)
         browser.setOpenExternalLinks(False)
-        
         layout.addWidget(browser)
-        
-        ok_button = QPushButton("OK")
+        ok_button = QPushButton("Đóng")
+        ok_button.setProperty("primary", True)
         ok_button.clicked.connect(dialog.accept)
         layout.addWidget(ok_button)
-        
         dialog.setLayout(layout)
         dialog.exec()
 
@@ -1149,11 +1136,11 @@ class ProgressDialog(QDialog):
         # Stats layout
         stats_layout = QHBoxLayout()
         self.success_label = QLabel("Thành công: 0")
-        self.success_label.setStyleSheet("color: #15803d; font-weight: 600;")
+        self.success_label.setStyleSheet("color: #5eead4; font-weight: 600;")
         self.skipped_label = QLabel("Bỏ qua: 0")
-        self.skipped_label.setStyleSheet("color: #1d4ed8; font-weight: 600;")
+        self.skipped_label.setStyleSheet("color: #94a3b8; font-weight: 600;")
         self.failed_label = QLabel("Thất bại: 0")
-        self.failed_label.setStyleSheet("color: #b91c1c; font-weight: 600;")
+        self.failed_label.setStyleSheet("color: #f87171; font-weight: 600;")
         stats_layout.addWidget(self.success_label)
         stats_layout.addStretch()
         stats_layout.addWidget(self.skipped_label)

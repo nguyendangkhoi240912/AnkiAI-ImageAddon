@@ -3,7 +3,9 @@ Imagen 4 Ultra Generate Integration - v1.0
 Image generation for flashcards with Gemini-guided image descriptions
 """
 
+import base64
 import logging
+import re
 import requests
 import json
 import time
@@ -17,6 +19,27 @@ logger = logging.getLogger(__name__)
 class ImageProviderError(Exception):
     """Exception cho Imagen provider"""
     pass
+
+
+def resolve_imagen_predict_url(endpoint: str = "") -> str:
+    """Map legacy generateContent URLs to Imagen 4 :predict endpoint."""
+    default_model = "imagen-4.0-generate-001"
+    if not endpoint or not str(endpoint).strip():
+        return (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{default_model}:predict"
+        )
+    endpoint = str(endpoint).strip()
+    if ":predict" in endpoint:
+        return endpoint
+    match = re.search(r"/models/([^/:]+)", endpoint)
+    model_id = match.group(1) if match else default_model
+    if "imagen-3" in model_id or ":generateContent" in endpoint:
+        model_id = default_model
+    return (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model_id}:predict"
+    )
 
 
 class GeminiImageDescriber:
@@ -210,7 +233,8 @@ class ImagenProvider:
         timeout: int = 25,
         max_concurrent: int = 2,
         retries: int = 2,
-        enable_safety: bool = True
+        enable_safety: bool = True,
+        endpoint: str = "",
     ):
         """
         Khởi tạo Imagen Provider
@@ -233,9 +257,9 @@ class ImagenProvider:
         self.retries = retries
         self.enable_safety = enable_safety
         
-        # Modelo
-        self.model = "imagen-3-ultra"
-        self.endpoint = "https://generativelanguage.googleapis.com/v1beta/models/imagen-3-ultra:generateContent"
+        self.endpoint = resolve_imagen_predict_url(endpoint)
+        match = re.search(r"/models/([^/:]+)", self.endpoint)
+        self.model = match.group(1) if match else "imagen-4.0-generate-001"
         
         # Session management
         import requests
@@ -310,36 +334,18 @@ class ImagenProvider:
         # Thêm style guidance vào prompt
         styled_prompt = self._add_style_guidance(prompt, style)
         
-        # Build request
         request_body = {
-            "contents": [{
-                "parts": [{
-                    "text": styled_prompt
-                }]
-            }],
-            "generationConfig": {
-                "imageSize": {
-                    "height": height,
-                    "width": width
-                },
-                "numberOfImages": num_images,
-                "safetySettings": [
-                    {
-                        "category": "HARM_CATEGORY_HATE_SPEECH",
-                        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                    },
-                    {
-                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                    }
-                ] if self.enable_safety else []
-            }
+            "instances": [{"prompt": styled_prompt}],
+            "parameters": self._build_predict_parameters(width, height, num_images),
         }
         
         last_error = None
         for attempt in range(self.retries):
             try:
-                logger.info(f"[Imagen] Generating image (attempt {attempt + 1}/{self.retries})...")
+                logger.info(
+                    f"[Imagen] Generating image via {self.model} "
+                    f"(attempt {attempt + 1}/{self.retries})..."
+                )
                 
                 response = self.session.post(
                     self.endpoint,
@@ -357,29 +363,52 @@ class ImagenProvider:
                     continue
                 
                 if response.status_code != 200:
-                    error_data = response.json()
-                    error_msg = error_data.get("error", {}).get("message", response.text)
+                    try:
+                        error_data = response.json()
+                        error_msg = error_data.get("error", {}).get("message", response.text)
+                    except ValueError:
+                        error_msg = response.text
                     last_error = f"{response.status_code}: {error_msg}"
                     logger.warning(f"Imagen error: {last_error}")
+                    # #region agent log
+                    from .debug_log import cursor_session_log
+
+                    cursor_session_log(
+                        "imagen_provider.py:generate_image",
+                        "predict_http_error",
+                        {
+                            "status": response.status_code,
+                            "model": self.model,
+                            "error": str(error_msg)[:240],
+                        },
+                        "B",
+                    )
+                    # #endregion
                     continue
                 
                 result = response.json()
-                
-                if "candidates" in result and len(result["candidates"]) > 0:
-                    images = []
-                    for candidate in result["candidates"]:
-                        if "image" in candidate:
-                            img_data = candidate["image"].get("bytesBase64", "")
-                            if img_data:
-                                import base64
-                                img_bytes = base64.b64decode(img_data)
-                                images.append(img_bytes)
-                    
-                    if images:
-                        with self.lock:
-                            self.success_count += 1
-                        logger.info(f"[✓] Imagen: Generated {len(images)} image(s)")
-                        return images
+                images = self._extract_images_from_predict_response(result)
+                # #region agent log
+                from .debug_log import cursor_session_log
+
+                cursor_session_log(
+                    "imagen_provider.py:generate_image",
+                    "predict_response",
+                    {
+                        "status": response.status_code,
+                        "model": self.model,
+                        "image_count": len(images),
+                        "prediction_keys": len(result.get("predictions") or []),
+                    },
+                    "B",
+                    run_id="post-fix",
+                )
+                # #endregion
+                if images:
+                    with self.lock:
+                        self.success_count += 1
+                    logger.info(f"[✓] Imagen: Generated {len(images)} image(s)")
+                    return images
                 
                 last_error = "No images in response"
                 continue
@@ -402,6 +431,45 @@ class ImagenProvider:
         
         raise ImageProviderError(f"Imagen image generation failed: {last_error}")
     
+    def _build_predict_parameters(
+        self, width: int, height: int, num_images: int
+    ) -> Dict:
+        """Map dimensions to Imagen :predict parameters (Gemini API)."""
+        if width > height * 1.2:
+            aspect_ratio = "16:9" if width / max(height, 1) >= 1.5 else "4:3"
+        elif height > width * 1.2:
+            aspect_ratio = "9:16" if height / max(width, 1) >= 1.5 else "3:4"
+        else:
+            aspect_ratio = "1:1"
+        image_size = "2K" if max(width, height) >= 1536 else "1K"
+        params: Dict = {
+            "sampleCount": num_images,
+            "aspectRatio": aspect_ratio,
+            "imageSize": image_size,
+        }
+        if self.enable_safety:
+            params["personGeneration"] = "allow_adult"
+        return params
+
+    def _extract_images_from_predict_response(self, result: dict) -> List[bytes]:
+        images: List[bytes] = []
+        for pred in result.get("predictions") or []:
+            if not isinstance(pred, dict):
+                continue
+            b64 = pred.get("bytesBase64Encoded") or pred.get("bytesBase64") or ""
+            if b64:
+                images.append(base64.b64decode(b64))
+        if images:
+            return images
+        for candidate in result.get("candidates") or []:
+            if not isinstance(candidate, dict):
+                continue
+            image_obj = candidate.get("image") or {}
+            b64 = image_obj.get("bytesBase64") or image_obj.get("bytesBase64Encoded") or ""
+            if b64:
+                images.append(base64.b64decode(b64))
+        return images
+
     def _add_style_guidance(self, prompt: str, style: str) -> str:
         """Thêm style guidance vào prompt"""
         style_guides = {
@@ -446,7 +514,11 @@ class ImageGenerationPipeline:
         gemini_api_keys: List[str],
         imagen_api_key: str,
         imagen_service_account: str = "",
-        enable_fallback_to_search: bool = True
+        enable_fallback_to_search: bool = True,
+        imagen_endpoint: str = "",
+        imagen_timeout: int = 25,
+        imagen_retries: int = 2,
+        enable_safety: bool = True,
     ):
         """
         Khởi tạo image generation pipeline
@@ -460,7 +532,11 @@ class ImageGenerationPipeline:
         self.describer = GeminiImageDescriber(gemini_api_keys)
         self.generator = ImagenProvider(
             api_key=imagen_api_key,
-            service_account_json=imagen_service_account
+            service_account_json=imagen_service_account,
+            timeout=imagen_timeout,
+            retries=imagen_retries,
+            enable_safety=enable_safety,
+            endpoint=imagen_endpoint,
         )
         self.enable_fallback = enable_fallback_to_search
         self.generation_log = []

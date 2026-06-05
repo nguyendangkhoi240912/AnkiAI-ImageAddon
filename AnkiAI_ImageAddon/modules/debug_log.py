@@ -37,6 +37,43 @@ def is_enabled() -> bool:
     return _ENABLED
 
 
+_CURSOR_DEBUG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "logs",
+    "debug-a7fba4.log",
+)
+
+
+def cursor_session_log(
+    location: str,
+    message: str,
+    data: dict,
+    hypothesis_id: str,
+    run_id: str = "pre-fix",
+) -> None:
+    """NDJSON log for Cursor debug session — only writes when debug logging is enabled."""
+    # BUG-1 FIX: Guard with _ENABLED to avoid disk I/O on every note in production
+    if not _ENABLED:
+        return
+    try:
+        parent = os.path.dirname(_CURSOR_DEBUG_PATH)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        entry = {
+            "sessionId": "a7fba4",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(_CURSOR_DEBUG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as e:
+        logger.debug("cursor_session_log failed: %s", e)
+
+
 def dbg(
     location: str,
     message: str,
