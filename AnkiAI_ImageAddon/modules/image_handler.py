@@ -506,6 +506,14 @@ class ImageHandler:
                     f"Field '{image_field_name}' không tồn tại. Available: {available_fields}"
                 )
 
+            current_content = note[image_field_name].strip()
+            if current_content and "<img" in current_content and not overwrite:
+                logger.info(
+                    "⏭️  Note already has image, skipping download: %s",
+                    vocabulary,
+                )
+                return "skipped", "Thẻ đã có ảnh rồi"
+
             # 1. Tải ảnh
             logger.info(f"📌 Downloading image for '{vocabulary}'...")
             image_data = self.download_image(url)
@@ -523,6 +531,7 @@ class ImageHandler:
 
             if not success:
                 logger.info(f"⏭️  Note already has image, no changes made: {vocabulary}")
+                self.remove_media_file(saved_filename)
                 return "skipped", "Thẻ đã có ảnh rồi"
             
             logger.info(f"✅ Successfully added image for '{vocabulary}': {saved_filename}")

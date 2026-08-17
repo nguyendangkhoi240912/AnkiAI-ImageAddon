@@ -9,13 +9,17 @@ env/
 ENV/
 .venv
 
-# IDE
+# IDE & local tools
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
+.kiro/
+.qoder/
+.sixth/
+AnkiAI-ImageAddon.worktrees/
 
 # Test & coverage
 .pytest_cache/

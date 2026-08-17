@@ -62,7 +62,7 @@
     "imagen_enabled": false,
     "imagen_api_key": "",
     "imagen_service_account_json": "",
-    "imagen_endpoint": "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict",
+    "imagen_endpoint": "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-ultra-generate-001:predict",
     "imagen_timeout_seconds": 25,
     "imagen_max_concurrent_requests": 2,
     "imagen_request_retries": 2,

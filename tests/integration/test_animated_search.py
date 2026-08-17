@@ -24,7 +24,15 @@ class TestAnimatedDomainSearch:
         from AnkiAI_ImageAddon.modules.provider_registry import DOMAIN_PROVIDERS
         
         animated_providers = DOMAIN_PROVIDERS.get("animated", [])
-        expected = {"klipy", "giphy", "tenor", "pixabay_animated", "iconscout"}
+        expected = {
+            "klipy",
+            "giphy",
+            "tenor",
+            "pixabay_animated",
+            "iconscout",
+            "waifu_pics",
+            "nekos_best",
+        }
         assert set(animated_providers) == expected
 
     def test_search_smart_with_animated_domain(self):
@@ -88,6 +96,22 @@ class TestAnimatedDomainSearch:
         assert results1 == results2
         # Provider should only be called once due to caching
         assert mock_provider.search.call_count == 1
+
+    def test_search_smart_deduplicates_urls(self):
+        """Test duplicate provider URLs are only returned once."""
+        mock_provider = Mock()
+        mock_provider.name = "giphy"
+        mock_provider.search.return_value = [
+            {"url": "https://media.giphy.com/same.gif", "title": "a", "provider": "giphy"},
+            {"url": "https://media.giphy.com/same.gif", "title": "b", "provider": "giphy"},
+        ]
+
+        selector = SmartImageSelector(max_workers=1)
+        selector.add_provider("giphy", mock_provider, domains={"animated"})
+
+        results = selector.search_smart("test", top_n=2, domains={"animated"})
+
+        assert results == ["https://media.giphy.com/same.gif"]
 
 
 class TestProviderStats:

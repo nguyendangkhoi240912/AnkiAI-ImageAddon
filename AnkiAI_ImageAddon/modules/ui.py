@@ -822,7 +822,7 @@ class ConfigDialog(QDialog):
         if gemini_key:
             try:
                 response = requests.post(
-                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
                     params={"key": gemini_key},
                     headers={"Content-Type": "application/json"},
                     json={
