@@ -262,6 +262,17 @@ class ImageCache:
             }
 
 
+def _dedupe_urls(urls: List[str]) -> List[str]:
+    seen = set()
+    unique = []
+    for url in urls:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        unique.append(url)
+    return unique
+
+
 class ProviderStats:
     def __init__(self, provider_name: str):
         self.name = provider_name
@@ -468,72 +479,82 @@ class SmartImageSelector:
             raise ImageProviderError("No image providers available")
 
         all_scored: List[ImageScore] = []
-        workers = min(self.max_workers, len(sorted_providers))
         deadline = time.time() + 25
+        provider_batch_size = min(
+            self.MAX_PROVIDERS_PER_SEARCH,
+            max(3, top_n * 3),
+        )
 
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            future_map = {
-                executor.submit(
-                    self._search_provider, p, keyword, precise_term
-                ): p[0]
-                for p in sorted_providers
-            }
-            pending = set(future_map.keys())
-            while pending and time.time() < deadline:
-                remaining = max(0.1, deadline - time.time())
-                done, pending = concurrent.futures.wait(
-                    pending,
-                    timeout=remaining,
-                    return_when=concurrent.futures.FIRST_COMPLETED,
-                )
-                for future in done:
-                    pname = future_map.get(future, "?")
-                    try:
-                        all_scored.extend(future.result())
-                    except FuturesTimeoutError:
-                        if pname in self.provider_stats:
-                            self.provider_stats[pname].record_failure()
-                    except Exception as e:
-                        logger.debug(f"search_smart future error ({pname}): {e}")
+        for start in range(0, len(sorted_providers), provider_batch_size):
+            batch = sorted_providers[start : start + provider_batch_size]
+            workers = min(self.max_workers, len(batch))
+            if not batch or time.time() >= deadline:
+                break
 
-            if pending:
-                # #region agent log
-                try:
-                    from .debug_log import dbg
-                    dbg(
-                        "image_providers.py:search_smart",
-                        "global_timeout_partial",
-                        {
-                            "partial_count": len(all_scored),
-                            "pending": len(pending),
-                            "providers": len(sorted_providers),
-                        },
-                        "G",
-                        run_id="post-fix",
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                future_map = {
+                    executor.submit(
+                        self._search_provider, p, keyword, precise_term
+                    ): p[0]
+                    for p in batch
+                }
+                pending = set(future_map.keys())
+                while pending and time.time() < deadline:
+                    remaining = max(0.1, deadline - time.time())
+                    done, pending = concurrent.futures.wait(
+                        pending,
+                        timeout=remaining,
+                        return_when=concurrent.futures.FIRST_COMPLETED,
                     )
-                except Exception:
-                    pass
-                # #endregion
-                logger.warning(
-                    "search_smart: deadline reached, %s pending providers skipped, %s results",
-                    len(pending),
-                    len(all_scored),
-                )
-                for future in pending:
-                    future.cancel()
+                    for future in done:
+                        pname = future_map.get(future, "?")
+                        try:
+                            all_scored.extend(future.result())
+                        except FuturesTimeoutError:
+                            if pname in self.provider_stats:
+                                self.provider_stats[pname].record_failure()
+                        except Exception as e:
+                            logger.debug(f"search_smart future error ({pname}): {e}")
+
+                    if len(self._pick_top_urls(all_scored, top_n)) >= top_n:
+                        for future in pending:
+                            future.cancel()
+                        pending.clear()
+                        break
+
+                if pending:
+                    # #region agent log
+                    try:
+                        from .debug_log import dbg
+                        dbg(
+                            "image_providers.py:search_smart",
+                            "global_timeout_partial",
+                            {
+                                "partial_count": len(all_scored),
+                                "pending": len(pending),
+                                "providers": len(batch),
+                            },
+                            "G",
+                            run_id="post-fix",
+                        )
+                    except Exception:
+                        pass
+                    # #endregion
+                    logger.warning(
+                        "search_smart: deadline reached, %s pending providers skipped, %s results",
+                        len(pending),
+                        len(all_scored),
+                    )
+                    for future in pending:
+                        future.cancel()
+
+            if len(self._pick_top_urls(all_scored, top_n)) >= top_n:
+                break
 
         if not all_scored:
             raise ImageProviderError(f"No images found for: '{keyword}'")
 
-        all_scored.sort(key=lambda x: x.score, reverse=True)
-        top_urls = []
-        for img in all_scored:
-            if _url_is_likely_downloadable(img.url):
-                top_urls.append(img.url)
-            if len(top_urls) >= top_n:
-                break
-        if not top_urls:
-            top_urls = [img.url for img in all_scored[:top_n] if img.url]
+        top_urls = self._pick_top_urls(all_scored, top_n)
 
         # #region agent log
         try:
@@ -551,6 +572,17 @@ class SmartImageSelector:
 
         self.cache.set(cache_key, top_urls)
         return top_urls
+
+    @staticmethod
+    def _pick_top_urls(scored: List[ImageScore], top_n: int) -> List[str]:
+        ordered = sorted(scored, key=lambda x: x.score, reverse=True)
+        likely = [
+            img.url for img in ordered if _url_is_likely_downloadable(img.url)
+        ]
+        top_urls = _dedupe_urls(likely)[:top_n]
+        if top_urls:
+            return top_urls
+        return _dedupe_urls([img.url for img in ordered if img.url])[:top_n]
 
     def get_best_image_url(
         self,

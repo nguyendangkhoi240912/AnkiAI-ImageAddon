@@ -4,13 +4,9 @@ Performance optimizations: centralized connection pooling, caching, adaptive ret
 """
 
 import logging
+import re
 import time
 from typing import Dict, List, Optional, Tuple, Any
-from functools import lru_cache
-import requests
-
-# 🚀 v5.3: Use centralized HTTP session manager
-from .http_session_manager import HTTPSessionManager
 
 from .ai_providers import (
     MultiAIProvider,
@@ -29,15 +25,15 @@ from .debug_log import dbg, cursor_session_log
 logger = logging.getLogger(__name__)
 
 
-# ✨ PERFORMANCE: Global session manager ensures connection pooling across all API calls (v5.3)
-def _get_api_session() -> requests.Session:
-    """Get session for API calls with automatic retry strategy"""
-    return HTTPSessionManager.get_session("api_calls")
-
-
 class APIError(Exception):
     """Exception cho API calls"""
     pass
+
+
+def _normalize_cache_text(value: str) -> str:
+    """Normalize note text so formatting differences reuse the same API/cache result."""
+    text = re.sub(r"<[^>]+>", " ", value or "")
+    return " ".join(text.split()).strip().lower()
 
 
 class SearchContextCache:
@@ -58,7 +54,7 @@ class SearchContextCache:
         logger.info(f"🚀 SearchContextCache initialized: max_size={max_size}, TTL={ttl_hours}h")
 
     def make_key(self, vocabulary: str, definition: str) -> str:
-        return f"{vocabulary}|{definition}".lower()
+        return f"{_normalize_cache_text(vocabulary)}|{_normalize_cache_text(definition)}"
 
     def get(self, key: str) -> Optional[SearchContext]:
         import time as _time
@@ -172,12 +168,20 @@ class AIImageProvider:
         # Imagen support (v5.0)
         self.imagen_enabled = provider_config.get("imagen_enabled", False) if provider_config else False
         self.imagen_api_key = provider_config.get("imagen_api_key", "") if provider_config else ""
+        if not self.imagen_api_key:
+            self.imagen_api_key = gemini_key
         self.gemini_desc_keys = [
             provider_config.get("gemini_image_description_api_key", ""),
             provider_config.get("gemini_image_description_api_key_backup_1", ""),
             provider_config.get("gemini_image_description_api_key_backup_2", "")
         ] if provider_config else []
         self.gemini_desc_keys = [k for k in self.gemini_desc_keys if k and k.strip()]
+        if not self.gemini_desc_keys and gemini_key:
+            self.gemini_desc_keys = [
+                gemini_key,
+                gemini_backup_key or gemini_keyword_backup
+            ]
+            self.gemini_desc_keys = [k for k in self.gemini_desc_keys if k and k.strip()]
         self.imagen_service_account = provider_config.get("imagen_service_account_json", "") if provider_config else ""
         self.imagen_fallback_to_search = provider_config.get("imagen_fallback_to_search_providers", True) if provider_config else True
         self.imagen_default_style = provider_config.get("imagen_default_style", "photorealistic") if provider_config else "photorealistic"
@@ -242,7 +246,12 @@ class AIImageProvider:
     def get_image_url(
         self, vocabulary: str, definition: str, examples: str = ""
     ) -> str:
-        result_cache_key = f"result_{vocabulary}|{definition}".lower()
+        result_cache_key = (
+            "result_"
+            f"{_normalize_cache_text(vocabulary)}|"
+            f"{_normalize_cache_text(definition)}|"
+            f"{_normalize_cache_text(examples)}"
+        )
         cached_url = self._get_result_cache(result_cache_key)
         if cached_url:
             return cached_url
@@ -333,6 +342,7 @@ class AIImageProvider:
             if not candidate_urls:
                 raise APIError(f"No images found for: '{ctx.keyword}'")
 
+            candidate_urls = self._dedupe_urls(candidate_urls)
             self._last_candidate_urls = list(candidate_urls)
 
             # #region agent log
@@ -372,7 +382,7 @@ class AIImageProvider:
 
     def get_fallback_image_urls(self) -> List[str]:
         """Remaining candidate URLs after the primary choice (for download retry)."""
-        return list(self._last_candidate_urls[1:8])
+        return self._dedupe_urls(self._last_candidate_urls[1:8])
 
     def _get_result_cache(self, key: str) -> Optional[str]:
         entry = self._result_url_cache.get(key)
@@ -389,6 +399,17 @@ class AIImageProvider:
         if len(self._result_url_cache) > 500:
             oldest = min(self._result_url_cache, key=lambda k: self._result_url_cache[k][1])
             del self._result_url_cache[oldest]
+
+    @staticmethod
+    def _dedupe_urls(urls: List[str]) -> List[str]:
+        seen = set()
+        unique = []
+        for url in urls:
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            unique.append(url)
+        return unique
 
     def get_imagen_blockers(self) -> List[str]:
         """Reasons Imagen cannot run (empty list = OK for generate mode)."""
@@ -477,7 +498,7 @@ class AIImageProvider:
         Chọn tự động: search-based vs generated.
         Trả về: (url_or_bytes, source)
         """
-        if prefer_generated and self.pipeline and self.imagen_enabled:
+        if prefer_generated and self.pipeline and (self.imagen_enabled or self._generation_mode in ("generate", "smart")):
             try:
                 logger.info(f"Smart selection: trying Imagen generation first for '{vocabulary}'...")
                 images, provider_name, metadata = self.generate_image_with_imagen(

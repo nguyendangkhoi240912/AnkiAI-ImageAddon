@@ -57,6 +57,8 @@ class TestProcessImageStatus:
         )
         assert status == "skipped"
         assert "ảnh" in msg.lower()
+        _dl.assert_not_called()
+        _save.assert_not_called()
 
     @patch.object(ImageHandler, "download_image", return_value=b"\xff\xd8\xff\x00")
     @patch.object(ImageHandler, "get_image_filename", return_value="w.jpg")

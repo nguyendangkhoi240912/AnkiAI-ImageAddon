@@ -22,8 +22,8 @@ class ImageProviderError(Exception):
 
 
 def resolve_imagen_predict_url(endpoint: str = "") -> str:
-    """Map legacy generateContent URLs to Imagen 4 :predict endpoint."""
-    default_model = "imagen-4.0-generate-001"
+    """Map legacy generateContent URLs to Imagen predict endpoint."""
+    default_model = "imagen-4.0-ultra-generate-001"
     if not endpoint or not str(endpoint).strip():
         return (
             "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -34,8 +34,6 @@ def resolve_imagen_predict_url(endpoint: str = "") -> str:
         return endpoint
     match = re.search(r"/models/([^/:]+)", endpoint)
     model_id = match.group(1) if match else default_model
-    if "imagen-3" in model_id or ":generateContent" in endpoint:
-        model_id = default_model
     return (
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model_id}:predict"
@@ -63,7 +61,7 @@ class GeminiImageDescriber:
         if not self.api_keys:
             raise ImageProviderError("At least one Gemini API key required for image description")
         
-        self.model = "gemini-3.1-flash-lite"
+        self.model = "gemini-3.5-flash-lite"
         self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
         self.timeout = 8
         self.cache = {}
@@ -154,6 +152,15 @@ class GeminiImageDescriber:
                     },
                     timeout=self.timeout
                 )
+                
+                # On resource errors, break immediately — keep gemini-3.5-flash-lite
+                # and let the API key rotation handle retries instead of downgrading model
+                if response.status_code in (400, 403, 404):
+                    error_msg = response.json().get("error", {}).get("message", response.text)
+                    logger.warning(
+                        f"[Gemini-ImageDescriber] {self.model} returned {response.status_code}: "
+                        f"{error_msg} — skipping to next API key"
+                    )
                 
                 if response.status_code != 200:
                     error_msg = response.json().get("error", {}).get("message", response.text)
@@ -259,7 +266,7 @@ class ImagenProvider:
         
         self.endpoint = resolve_imagen_predict_url(endpoint)
         match = re.search(r"/models/([^/:]+)", self.endpoint)
-        self.model = match.group(1) if match else "imagen-4.0-generate-001"
+        self.model = match.group(1) if match else "imagen-4.0-ultra-generate-001"
         
         # Session management
         import requests
@@ -362,6 +369,28 @@ class ImagenProvider:
                     time.sleep(wait_time)
                     continue
                 
+                # Try fallback models if we get resource errors
+                while response.status_code in (400, 403, 404):
+                    if "imagen-4.0-ultra" in self.model:
+                        logger.info("Imagen 4 Ultra failed/not supported. Falling back to Imagen 4 Standard...")
+                        self.model = "imagen-4.0-generate-001"
+                        self.endpoint = resolve_imagen_predict_url(self.model)
+                    elif "imagen-4.0-generate" in self.model:
+                        logger.info("Imagen 4 Standard failed/not supported. Falling back to Imagen 3...")
+                        self.model = "imagen-3.0-generate-002"
+                        self.endpoint = resolve_imagen_predict_url(self.model)
+                    else:
+                        break  # No more fallbacks available
+                        
+                    logger.info(f"[Imagen] Retrying with model: {self.model}")
+                    response = self.session.post(
+                        self.endpoint,
+                        params={"key": self.api_key},
+                        headers={"Content-Type": "application/json"},
+                        json=request_body,
+                        timeout=self.timeout
+                    )
+
                 if response.status_code != 200:
                     try:
                         error_data = response.json()
