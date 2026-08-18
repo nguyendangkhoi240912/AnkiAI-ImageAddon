@@ -23,6 +23,9 @@ AnkiAI-ImageAddon.worktrees/
 
 # Add-on user data / cache files
 AnkiAI_ImageAddon/user_files/*.json
+AnkiAI_ImageAddon/user_files/*.sqlite
+AnkiAI_ImageAddon/user_files/models/
+AnkiAI_ImageAddon/user_files/logs/
 !AnkiAI_ImageAddon/user_files/.gitkeep
 
 # Test & coverage
