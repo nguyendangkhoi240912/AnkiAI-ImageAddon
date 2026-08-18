@@ -24,6 +24,82 @@ def get_manifest():
         return json.load(f)
 
 
+def validate():
+    """
+    Validate all Python files before building:
+    1. AST parse check for syntax errors (catches f-string nesting, %% typos, etc.)
+    2. Template string interpolation check for ui_theme.py
+    Returns True if all checks pass, False otherwise.
+    """
+    import ast
+    import re
+
+    addon_root = get_addon_root()
+    errors = []
+
+    print("🔍 Validating Python source files...")
+
+    # ── 1. AST syntax check for every .py file ──────────────────────────────
+    for root, dirs, files in os.walk(addon_root):
+        for file in sorted(files):
+            if not file.endswith(".py"):
+                continue
+            path = Path(root) / file
+            try:
+                source = path.read_text(encoding="utf-8")
+                ast.parse(source, filename=str(path))
+                rel = path.relative_to(Path(__file__).parent)
+                print(f"   ✓ {rel}")
+            except SyntaxError as e:
+                rel = path.relative_to(Path(__file__).parent)
+                errors.append(f"SyntaxError in {rel}: line {e.lineno} — {e.msg}")
+                print(f"   ❌ {rel}: line {e.lineno} — {e.msg}")
+            except Exception as e:
+                rel = path.relative_to(Path(__file__).parent)
+                errors.append(f"ParseError in {rel}: {e}")
+                print(f"   ❌ {rel}: {e}")
+
+    # ── 2. ui_theme.py: check for stray '%%' in the CSS template ────────────
+    ui_theme_path = addon_root / "modules" / "ui_theme.py"
+    if ui_theme_path.exists():
+        source = ui_theme_path.read_text(encoding="utf-8")
+        # Detect the classic typo: 'return template %% t'
+        double_pct = re.search(r"return\s+template\s+%%\s+", source)
+        if double_pct:
+            errors.append(
+                "ui_theme.py: Found 'return template %% t' — "
+                "should be 'return template % t'. This causes SyntaxError at runtime."
+            )
+            print("   ❌ ui_theme.py: 'return template %% t' must be 'return template % t'")
+
+    # ── 3. ui_theme.py: dry-run the stylesheet builder ──────────────────────
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("ui_theme_check", ui_theme_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        dark_css = mod.build_stylesheet(dark=True)
+        light_css = mod.build_stylesheet(dark=False)
+        if len(dark_css) < 500 or len(light_css) < 500:
+            errors.append("ui_theme.py: build_stylesheet() returned suspiciously short CSS.")
+            print("   ❌ ui_theme.py: stylesheet too short — template substitution may have failed.")
+        else:
+            print(f"   ✓ ui_theme.py: Dark CSS = {len(dark_css)} chars, Light CSS = {len(light_css)} chars")
+    except Exception as e:
+        errors.append(f"ui_theme.py runtime check failed: {e}")
+        print(f"   ❌ ui_theme.py runtime check: {e}")
+
+    # ── Result ───────────────────────────────────────────────────────────────
+    if errors:
+        print(f"\n❌ VALIDATION FAILED — {len(errors)} error(s):")
+        for err in errors:
+            print(f"   • {err}")
+        return False
+    else:
+        print("✅ All validation checks passed!\n")
+        return True
+
+
 def build_addon(output_dir=None):
     """
     Build add-on thành .ankiaddon
@@ -31,7 +107,11 @@ def build_addon(output_dir=None):
     Args:
         output_dir: Thư mục output (default: current directory)
     """
-    
+    # Always validate before packaging
+    if not validate():
+        print("\n🚫 Build aborted due to validation errors. Fix them first.")
+        sys.exit(1)
+
     addon_root = get_addon_root()
     manifest = get_manifest()
     
@@ -153,13 +233,15 @@ AnkiAI Build Script
 ====================
 
 Usage:
-  python build.py build [output_dir]    - Build .ankiaddon file
+  python build.py build [output_dir]    - Validate + Build .ankiaddon file
+  python build.py validate              - Run validation checks only
   python build.py install               - Install locally for testing
   python build.py clean                 - Clean cache files
 
 Examples:
-  python build.py build                 # Create in current directory
-  python build.py build ~/Desktop       # Create in Desktop
+  python build.py validate              # Check for syntax errors before building
+  python build.py build                 # Validate, then create in current directory
+  python build.py build ~/Desktop       # Validate, then create in Desktop
   python build.py install               # Install to Anki addons folder
   python build.py clean                 # Remove __pycache__
         """)
@@ -170,6 +252,10 @@ Examples:
     if command == "build":
         output_dir = sys.argv[2] if len(sys.argv) > 2 else None
         build_addon(output_dir)
+    
+    elif command == "validate":
+        ok = validate()
+        sys.exit(0 if ok else 1)
     
     elif command == "install":
         install_locally()
