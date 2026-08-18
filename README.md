@@ -699,14 +699,14 @@ Recommendation: Search (visual reference) hoặc DALL-E
 ## 📚 Documentation
 
 ### Comprehensive Guides
-- **[GIF_ANIMATED_PROVIDERS_GUIDE.md](./GIF_ANIMATED_PROVIDERS_GUIDE.md)** - Hướng dẫn chi tiết GIF providers
-- **[GIF_QUICK_REFERENCE.md](./GIF_QUICK_REFERENCE.md)** - Quick setup GIF (5 phút)
-- **[GIF_INTEGRATION_SUMMARY.md](./GIF_INTEGRATION_SUMMARY.md)** - Chi tiết kỹ thuật tích hợp
-- **[RELEASE_V5.0_GIF_PROVIDERS.md](./RELEASE_V5.0_GIF_PROVIDERS.md)** - Release notes v5.0
+- **[GIF & Animated Providers](docs/guides/GIF_ANIMATED_PROVIDERS.md)** - Hướng dẫn chi tiết GIF providers
+- **[GIF Quick Reference](docs/guides/GIF_QUICK_REFERENCE.md)** - Quick setup GIF (5 phút)
+- **[GIF Integration Summary](docs/archive/GIF_INTEGRATION_SUMMARY.md)** - Chi tiết kỹ thuật tích hợp
+- **[GIF Providers Release Notes](docs/archive/RELEASE_V5.0_GIF_PROVIDERS.md)** - Release notes v5.0
 
 ### Reference
-- **[API_REFERENCE.md](./API_REFERENCE.md)** - API documentation
-- **[CONFIG_REFERENCE_V4.3.md](./CONFIG_REFERENCE_V4.3.md)** - Config options
+- **[API Reference](docs/guides/API_REFERENCE.md)** - API documentation
+- **[Config Reference](docs/guides/CONFIG_REFERENCE.md)** - Config options
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Code architecture
 
 ### Troubleshooting
