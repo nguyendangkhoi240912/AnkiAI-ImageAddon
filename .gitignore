@@ -21,6 +21,10 @@ ENV/
 .sixth/
 AnkiAI-ImageAddon.worktrees/
 
+# Add-on user data / cache files
+AnkiAI_ImageAddon/user_files/*.json
+!AnkiAI_ImageAddon/user_files/.gitkeep
+
 # Test & coverage
 .pytest_cache/
 .coverage
