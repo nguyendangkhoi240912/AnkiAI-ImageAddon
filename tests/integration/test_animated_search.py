@@ -27,7 +27,6 @@ class TestAnimatedDomainSearch:
         expected = {
             "klipy",
             "giphy",
-            "tenor",
             "pixabay_animated",
             "iconscout",
             "waifu_pics",
@@ -112,6 +111,16 @@ class TestAnimatedDomainSearch:
         results = selector.search_smart("test", top_n=2, domains={"animated"})
 
         assert results == ["https://media.giphy.com/same.gif"]
+
+    def test_legacy_tenor_key_logged_and_ignored(self, caplog):
+        """Test that legacy tenor_api_key in config is ignored with a warning and does not crash."""
+        import logging
+        cfg = {"tenor_api_key": "legacy_key_123"}
+        with caplog.at_level(logging.WARNING):
+            selector = build_smart_selector(cfg)
+        assert selector is not None
+        assert "tenor" not in selector.providers
+        assert any("tenor" in record.message.lower() for record in caplog.records)
 
 
 class TestProviderStats:

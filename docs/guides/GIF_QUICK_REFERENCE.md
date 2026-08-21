@@ -1,16 +1,15 @@
 # 🎬 Quick Reference - GIF Animated Providers
 
-## 5 GIF Provider - So sánh nhanh
+## GIF Providers - So sánh nhanh
 
 | Provider | Lấy Key | Miễn phí | Tốt nhất cho |
 |----------|---------|---------|-------------|
 | **KLIPY** | https://www.klipy.io/developers | ✅ | Ngoại ngữ + Localization |
 | **Pixabay** | https://pixabay.com/api/ | ✅ | Ảnh động không lo bản quyền |
 | **GIPHY** | https://developers.giphy.com | ✅ (Beta) | Phản ứng GIF đa dạng |
-| **Tenor** | https://tenor.com/developer | ✅* | Gợi ý từ khóa thông minh |
 | **IconScout** | https://iconscout.com/api | ⚠️ | Biểu tượng động tối giản |
 
-*Tenor đóng 30-06-2026
+*(Lưu ý: Tenor API đã đóng cửa từ 30-06-2026 và đã được gỡ bỏ khỏi addon)*
 
 ---
 
@@ -55,14 +54,6 @@ Config: "pixabay_api_key"
 URL: https://developers.giphy.com
 Path: Create App → Get API Key
 Config: "giphy_api_key"
-```
-
-### Tenor
-```
-URL: https://tenor.com/developer
-Path: Create App → Copy API Key
-Config: "tenor_api_key"
-Warning: Đóng 30-06-2026
 ```
 
 ### IconScout
@@ -156,7 +147,7 @@ Provider: GIPHY (phản ứng GIF đa dạng)
 | GIF không tải | Kiểm tra API key đúng? Try provider khác |
 | Quá chậm | Giảm `max_concurrent_providers` xuống 3 |
 | Rate limit | Addon tự động delay. Chờ một chút |
-| Tenor lỗi | Tenor đóng 30-06-2026. Dùng KLIPY/GIPHY |
+| Tenor lỗi | Tenor API đã đóng cửa 30-06-2026. Hãy dùng KLIPY/GIPHY |
 | Không có GIF | Thử keyword khác hoặc provider khác |
 
 ---

@@ -5,111 +5,6 @@ import os
 import unittest
 from unittest.mock import MagicMock
 
-# Setup mock aqt before any imports
-class MockWidget(MagicMock):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._text = ""
-        self._value = 0
-        self._checked = False
-        self._items = []
-        self._properties = {}
-        self._current_text = ""
-
-    def setText(self, val):
-        self._text = str(val)
-
-    def text(self):
-        return self._text
-
-    def setValue(self, val):
-        self._value = int(val)
-
-    def value(self):
-        return self._value
-
-    def setChecked(self, val):
-        self._checked = bool(val)
-
-    def isChecked(self):
-        return self._checked
-
-    def addItems(self, items):
-        self._items.extend(items)
-        if self._items and not self._current_text:
-            self._current_text = self._items[0]
-
-    def addItem(self, text, data=None):
-        self._items.append(text)
-        if not self._current_text:
-            self._current_text = text
-
-    def setCurrentText(self, text):
-        self._current_text = text
-
-    def currentText(self):
-        return self._current_text
-
-    def findData(self, data):
-        return 0
-
-    def currentData(self):
-        return "search"
-
-    def setProperty(self, k, v):
-        self._properties[k] = v
-
-class MockFinder:
-    def find_spec(self, fullname, path, target=None):
-        if fullname == "aqt" or fullname.startswith("aqt."):
-            from importlib.machinery import ModuleSpec
-            return ModuleSpec(fullname, self)
-        return None
-
-    def create_module(self, spec):
-        fullname = spec.name
-        if fullname == "aqt":
-            import types
-            m = types.ModuleType("aqt")
-            m.mw = MagicMock()
-            m.gui_hooks = MagicMock()
-            m.__path__ = []
-            return m
-        elif fullname == "aqt.qt":
-            import types
-            m = types.ModuleType("aqt.qt")
-            widgets = [
-                "QDialog", "QVBoxLayout", "QHBoxLayout", "QLabel", "QComboBox",
-                "QPushButton", "QWidget", "QProgressBar", "QLineEdit", "QTextBrowser",
-                "QCheckBox", "QSpinBox", "QFrame", "QScrollArea", "QTabWidget",
-                "QToolButton", "QSizePolicy", "QMessageBox", "QApplication"
-            ]
-            for w in widgets:
-                setattr(m, w, MockWidget)
-            m.QDialog.DialogCode = MagicMock()
-            m.QDialog.DialogCode.Accepted = 1
-            m.QDialog.DialogCode.Rejected = 0
-            m.QLineEdit.EchoMode = MagicMock()
-            m.QLineEdit.EchoMode.Password = 2
-            m.QLineEdit.EchoMode.Normal = 0
-            m.QFrame.Shape = MagicMock()
-            m.QFrame.Shape.HLine = 4
-            m.QSizePolicy.Policy = MagicMock()
-            m.QSizePolicy.Policy.Fixed = 0
-            m.QMessageBox.StandardButton = MagicMock()
-            m.QMessageBox.StandardButton.Yes = 16384
-            return m
-        elif fullname == "aqt.browser":
-            import types
-            m = types.ModuleType("aqt.browser")
-            m.Browser = MagicMock
-            return m
-        return MagicMock()
-
-    def exec_module(self, module):
-        pass
-
-sys.meta_path.insert(0, MockFinder())
 sys.path.insert(0, os.path.abspath("."))
 
 from AnkiAI_ImageAddon.modules.ui_theme import get_tokens, build_stylesheet, is_dark_mode, apply_dialog_theme
@@ -134,17 +29,17 @@ class TestUIRedesign(unittest.TestCase):
     def test_01_theme_tokens_and_stylesheet(self):
         dark_tokens = get_tokens(dark=True)
         light_tokens = get_tokens(dark=False)
-        self.assertEqual(dark_tokens["bg_window"], "#13141f")
-        self.assertEqual(light_tokens["bg_window"], "#f8fafc")
-        self.assertEqual(dark_tokens["accent"], "#14b8a6")
-        self.assertEqual(light_tokens["accent"], "#0d9488")
+        self.assertEqual(dark_tokens["bg_window"], "#080A10")
+        self.assertEqual(light_tokens["bg_window"], "#EEF2F7")
+        self.assertEqual(dark_tokens["accent"], "#00A3FF")
+        self.assertEqual(light_tokens["accent"], "#0070C0")
         
         qss_dark = build_stylesheet(dark=True)
         qss_light = build_stylesheet(dark=False)
         self.assertIn("QDialog", qss_dark)
         self.assertIn("QTabWidget", qss_dark)
-        self.assertIn("#13141f", qss_dark)
-        self.assertIn("#f8fafc", qss_light)
+        self.assertIn("#080A10", qss_dark)
+        self.assertIn("#EEF2F7", qss_light)
 
     def test_02_ui_widgets_primitives(self):
         h = header_section("Title", "Subtitle", icon="⭐")
@@ -191,7 +86,6 @@ class TestUIRedesign(unittest.TestCase):
             "europeana_api_key": "europeana_key_123",
             "klipy_app_key": "klipy_123",
             "giphy_api_key": "giphy_123",
-            "tenor_api_key": "tenor_123",
             "iconscout_api_token": "iconscout_123",
             "enable_ai_evaluation": True,
             "gemini_eval_api_key_1": "eval1",

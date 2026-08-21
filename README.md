@@ -23,11 +23,10 @@
 - **Academic**: Library of Congress, Met Museum, Europeana
 - **Search engines**: Google Custom Search, DuckDuckGo, Yandex
 
-### 🎬 Animated Images - NEW! (5 providers)
+### 🎬 Animated Images (4 providers)
 - **KLIPY**: Localization support (tìm GIF phù hợp văn hóa)
 - **Pixabay GIFs**: Chất lượng cao, không lo bản quyền
 - **GIPHY**: Kho lưu GIF khổng lồ
-- **Tenor**: Tìm kiếm thông minh (hoạt động đến 30-06-2026)
 - **IconScout**: Biểu tượng động tối giản (cognitive-friendly)
 
 ### 🧠 AI Features
@@ -140,7 +139,7 @@ Definition: "Quá trình tạo năng lượng từ ánh sáng"
 ```
 Vocabulary: "running"
          ↓
-         Search KLIPY, GIPHY, Tenor, Pixabay, IconScout
+         Search KLIPY, GIPHY, Pixabay, IconScout
          ↓
          Display top 5 GIFs
          ↓
@@ -255,17 +254,6 @@ Definition: "Hệ thống chính trị..."
 - **Đặc điểm**: Kho GIF khổng lồ
 - **Phù hợp cho**: Phản ứng, memes, trends
 
-#### Tenor
-```json
-{
-    "tenor_api_key": "YOUR_TENOR_API_KEY"
-}
-```
-- Lấy key: https://tenor.com/developer
-- **Giá**: Miễn phí
-- ⚠️ **DEPRECATED**: Google sẽ đóng cửa 30-06-2026
-- **Phù hợp cho**: Tìm kiếm thông minh (hiện tại)
-
 #### Pixabay GIFs
 ```json
 {
@@ -317,7 +305,6 @@ Definition: "Hệ thống chính trị..."
     "openai_api_key": "sk-YOUR_KEY",
     "klipy_app_key": "YOUR_KLIPY_KEY",
     "giphy_api_key": "YOUR_GIPHY_KEY",
-    "tenor_api_key": "YOUR_TENOR_KEY",
     "pixabay_api_key": "YOUR_PIXABAY_KEY",
     "iconscout_api_token": "YOUR_ICONSCOUT_TOKEN"
 }
@@ -358,7 +345,7 @@ Tools > Add-ons > AnkiAI > Config:
 
 ## 🎬 Thêm ảnh động (GIF) - v5.0+
 
-Addon hỗ trợ **5 nền tảng GIF chuyên nghiệp**:
+Addon hỗ trợ **4 nền tảng GIF chuyên nghiệp**:
 
 | Provider | Đặc điểm | Giá |
 |----------|----------|-----|
@@ -366,7 +353,8 @@ Addon hỗ trợ **5 nền tảng GIF chuyên nghiệp**:
 | **Pixabay GIFs** | Không lo bản quyền, chất lượng cao | Miễn phí |
 | **IconScout** | Biểu tượng động, tối giản | Giới hạn |
 | **GIPHY** | Kho lưu GIF khổng lồ | Beta miễn phí |
-| **Tenor** | Tìm kiếm thông minh (đóng 30-06-2026) | Miễn phí* |
+
+*(Lưu ý: Tenor đã đóng cửa từ 30-06-2026 và đã được gỡ bỏ khỏi addon)*
 
 ### Cách sử dụng GIF
 
@@ -409,7 +397,6 @@ Addon hỗ trợ **5 nền tảng GIF chuyên nghiệp**:
 | Service | Giá | Ghi chú |
 |---------|-----|---------|
 | **OpenAI (DALL-E 3)** | $0.08/ảnh | Tạo ảnh mới, cần setup billing |
-| **Tenor** | Miễn phí* | Đóng cửa 30-06-2026 |
 | **IconScout** | Giới hạn | Free tier có giới hạn |
 
 ### Dự tính chi phí
@@ -500,10 +487,10 @@ Lựa chọn: Dùng free providers + DALL-E khi cần = Tối ưu chi phí!
 - Free tier: $5 credits (hết trong 3 tháng)
 - Recommendation: Dùng search providers trước!
 
-### Q: Tenor sẽ bị đóng khi nào?
-**A**: Google thông báo đóng cửa **30 tháng 6 năm 2026**
-- Addon sẽ tự động disable sau ngày đó
-- Fallback → GIPHY, KLIPY
+### Q: Tenor đã đóng cửa chưa?
+**A**: Google đã chính thức đóng cửa Tenor API vào **30 tháng 6 năm 2026**.
+- Addon đã gỡ bỏ hoàn toàn Tenor Provider.
+- Thay vào đó, hãy sử dụng: GIPHY, KLIPY, Pixabay GIFs.
 
 ### Q: Addon sẽ thêm ảnh sai không?
 **A**: Có khả năng! Giải pháp:
@@ -726,7 +713,6 @@ Recommendation: Search (visual reference) hoặc DALL-E
 - **OpenAI**: https://platform.openai.com/api-keys
 - **KLIPY**: https://www.klipy.io/developers
 - **GIPHY**: https://developers.giphy.com
-- **Tenor**: https://tenor.com/developer
 - **IconScout**: https://iconscout.com/api
 
 ### Official Resources
@@ -906,10 +892,10 @@ Art: DALL-E + Unsplash (creative + reference)
 
 ## ⚠️ Important Notes
 
-### Tenor Deprecation Alert 🚨
-- Google sẽ đóng Tenor API: **30 tháng 6 năm 2026**
-- Addon sẽ tự động fallback → GIPHY/KLIPY
-- Hãy setup backup GIF provider ngay!
+### Tenor API Shutdown ℹ️
+- Google đã đóng Tenor API vào ngày **30 tháng 6 năm 2026**.
+- Tenor Provider đã được gỡ bỏ khỏi addon. Các provider ảnh động thay thế: KLIPY, Pixabay, GIPHY, IconScout.
+- Khóa cấu hình cũ `tenor_api_key` nếu còn sẽ được tự động bỏ qua an toàn.
 
 ### Rate Limiting Protection
 - Addon tự động handle rate limits

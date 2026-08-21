@@ -33,7 +33,6 @@ from .scientific import (
 from .animated import (
     KLIPYProvider,
     GIPHYProvider,
-    TenorProvider,
     PixabayAnimatedProvider,
     IconScoutProvider,
 )
@@ -75,7 +74,6 @@ __all__ = [
     "BioiconsProvider",
     "KLIPYProvider",
     "GIPHYProvider",
-    "TenorProvider",
     "PixabayAnimatedProvider",
     "IconScoutProvider",
     "HPAPIProvider",

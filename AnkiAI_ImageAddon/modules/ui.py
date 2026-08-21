@@ -715,7 +715,6 @@ class ConfigDialog(QDialog):
         _gif = [
             ("KLIPY",     "klipy.io/developers",         "recommended", "klipy_input",     "Klipy App Key"),
             ("GIPHY",     "developers.giphy.com",         "optional",    "giphy_input",     "GIPHY API Key"),
-            ("Tenor",     "Google Cloud / Tenor API",     "optional",    "tenor_input",     "Tenor API Key"),
             ("IconScout", "iconscout.com/api (Icons & Vectors)", "optional", "iconscout_input", "IconScout Token"),
         ]
         first = True
@@ -858,7 +857,6 @@ class ConfigDialog(QDialog):
             self.europeana_input.setText(self.existing_config.get("europeana_api_key", ""))
             self.klipy_input.setText(self.existing_config.get("klipy_app_key", ""))
             self.giphy_input.setText(self.existing_config.get("giphy_api_key", ""))
-            self.tenor_input.setText(self.existing_config.get("tenor_api_key", ""))
             self.iconscout_input.setText(self.existing_config.get("iconscout_api_token", ""))
             self.enable_ai_eval_checkbox.setChecked(bool(self.existing_config.get("enable_ai_evaluation", True)))
             for i in range(1, 8):
@@ -924,7 +922,6 @@ class ConfigDialog(QDialog):
             "europeana_api_key": self.europeana_input.text().strip(),
             "klipy_app_key": self.klipy_input.text().strip(),
             "giphy_api_key": self.giphy_input.text().strip(),
-            "tenor_api_key": self.tenor_input.text().strip(),
             "iconscout_api_token": self.iconscout_input.text().strip(),
             "enable_ai_evaluation": self.enable_ai_eval_checkbox.isChecked(),
             **eval_keys,

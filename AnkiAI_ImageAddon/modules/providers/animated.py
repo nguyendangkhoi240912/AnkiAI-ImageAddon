@@ -109,62 +109,6 @@ class GIPHYProvider:
             raise ImageProviderError(str(e))
 
 
-class TenorProvider:
-    """Tenor GIF search API."""
-
-    def __init__(self, api_key: str, client_key: str = "ankiai-image-addon"):
-        if not api_key:
-            raise ImageProviderError("Tenor API key required")
-        self.api_key = api_key
-        self.client_key = client_key
-        self.name = "tenor"
-        self.session = _ImageProviderSessionManager.get_session("tenor")
-
-    def search(self, keyword: str, per_page: int = 3) -> List[Dict]:
-        try:
-            response = self.session.get(
-                "https://tenor.googleapis.com/v2/search",
-                params={
-                    "key": self.api_key,
-                    "client_key": self.client_key,
-                    "q": keyword,
-                    "limit": min(max(per_page, 1), 50),
-                    "contentfilter": "low",
-                    "media_filter": "gif",
-                    "locale": "en_US",
-                    "country": "US",
-                },
-                timeout=6,
-            )
-            if response.status_code != 200:
-                raise ImageProviderError(f"Tenor {response.status_code}")
-            payload = response.json()
-            results = payload.get("results", [])
-            if not results:
-                raise ImageProviderError("No results")
-            images: List[Dict] = []
-            for item in results[:per_page]:
-                media = item.get("media_formats", {})
-                url = (
-                    media.get("gif", {}).get("url")
-                    or media.get("tinygif", {}).get("url")
-                    or media.get("nanogif", {}).get("url")
-                )
-                if url:
-                    images.append(
-                        result_dict(
-                            url,
-                            item.get("content_description") or keyword,
-                            self.name,
-                        )
-                    )
-            if not images:
-                raise ImageProviderError("No Tenor image URLs")
-            return images
-        except Exception as e:
-            raise ImageProviderError(str(e))
-
-
 class PixabayAnimatedProvider:
     """Pixabay search with GIF-friendly image_type."""
 
