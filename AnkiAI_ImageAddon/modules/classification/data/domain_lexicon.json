@@ -1,0 +1,29 @@
+{
+  "chemistry_physics": [
+    "photosynthesis", "isotope", "molecule", "atom", "electron", "proton", "neutron",
+    "catalyst", "exothermic", "endothermic", "titration", "polymer", "peptide",
+    "covalent", "ionic", "thermodynamics", "diffraction", "quantum", "relativity",
+    "velocity", "acceleration", "entropy", "enthalpy", "valence", "stoichiometry",
+    "chromatography", "electrolysis", "spectroscopy", "oxidation", "reduction",
+    "radioactivity", "nanotechnology", "photon", "quark", "boson", "superconductor"
+  ],
+  "biology_medicine": [
+    "mitosis", "meiosis", "chromosome", "genome", "ribosome", "mitochondria",
+    "chloroplast", "pathogen", "antibody", "antigen", "phagocytosis", "homeostasis",
+    "prokaryote", "eukaryote", "endoplasmic", "cardiology", "neurology", "oncogene",
+    "apoptosis", "taxonomy", "phenotype", "genotype", "histology", "pharmacology",
+    "biopsy", "epidermis", "neurotransmitter", "synapse", "hemoglobin", "cytoplasm",
+    "myelin", "lymphocyte", "pathology", "metabolism", "enzyme", "hormone"
+  ],
+  "astronomy_geology": [
+    "asteroid", "supernova", "nebula", "exoplanet", "tectonic", "magma", "basalt",
+    "sedimentary", "metamorphic", "seismology", "stratosphere", "troposphere",
+    "eclipse", "meteorite", "constellation", "pulsar", "quasar", "black hole",
+    "lithosphere", "asthenosphere", "geomorphology", "paleontology", "heliosphere"
+  ],
+  "mathematics_computing": [
+    "algorithm", "polynomial", "derivative", "integral", "matrix", "vector",
+    "eigenvector", "logarithm", "asymptote", "topology", "combinatorics",
+    "cryptography", "recursion", "heuristic", "neural network", "compiler"
+  ]
+}

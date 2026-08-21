@@ -1,0 +1,14 @@
+{
+  "single_word": [
+    "above", "below", "under", "over", "between", "among", "behind",
+    "inside", "outside", "beside", "near", "across", "through",
+    "into", "onto", "towards", "up", "down", "around", "alongside",
+    "against", "upon", "within", "beneath", "underneath", "atop",
+    "opposite", "aboard", "amid", "amidst", "astride", "beyond"
+  ],
+  "multi_word": [
+    "in front of", "next to", "out of", "away from", "close to",
+    "on top of", "to the left of", "to the right of", "in the middle of",
+    "ahead of", "adjacent to", "in between", "at the back of"
+  ]
+}

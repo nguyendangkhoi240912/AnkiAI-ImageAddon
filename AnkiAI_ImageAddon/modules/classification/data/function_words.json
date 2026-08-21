@@ -1,0 +1,34 @@
+{
+  "articles": ["a", "an", "the"],
+  "conjunctions": [
+    "and", "but", "or", "nor", "for", "yet", "so",
+    "although", "because", "since", "unless", "while", "whereas",
+    "however", "therefore", "moreover", "furthermore", "nevertheless",
+    "consequently", "meanwhile", "otherwise", "besides", "thus", "hence"
+  ],
+  "prepositions": [
+    "of", "to", "in", "for", "with", "on", "at", "from", "by", "about",
+    "as", "into", "like", "through", "after", "over", "between", "out",
+    "against", "during", "without", "before", "under", "around", "among"
+  ],
+  "pronouns": [
+    "i", "you", "he", "she", "it", "we", "they",
+    "me", "him", "her", "us", "them",
+    "my", "your", "his", "our", "their", "its",
+    "mine", "yours", "hers", "ours", "theirs",
+    "myself", "yourself", "himself", "herself", "itself", "ourselves", "yourselves", "themselves",
+    "this", "that", "these", "those",
+    "who", "whom", "whose", "which", "what", "whatever", "whoever", "whichever"
+  ],
+  "auxiliary_verbs": [
+    "be", "am", "is", "are", "was", "were", "being", "been",
+    "have", "has", "had", "having",
+    "do", "does", "did", "doing", "done",
+    "will", "would", "shall", "should", "may", "might", "must", "can", "could", "ought"
+  ],
+  "particles_and_adverbs": [
+    "not", "no", "too", "very", "quite", "rather", "just", "only", "also",
+    "either", "neither", "almost", "nearly", "indeed", "perhaps", "maybe",
+    "there", "here", "when", "where", "why", "how", "then", "now", "again"
+  ]
+}

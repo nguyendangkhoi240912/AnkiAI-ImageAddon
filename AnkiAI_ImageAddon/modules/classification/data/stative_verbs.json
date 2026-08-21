@@ -1,0 +1,23 @@
+{
+  "cognitive": [
+    "believe", "know", "think", "understand", "recognize", "realize",
+    "doubt", "remember", "forget", "suppose", "suspect", "imagine",
+    "mean", "agree", "disagree", "comprehend", "perceive", "conclude",
+    "deduce", "expect", "assume", "presume", "recollect", "rely", "trust"
+  ],
+  "emotional": [
+    "love", "like", "hate", "dislike", "prefer", "adore", "detest",
+    "care", "appreciate", "envy", "fear", "mind", "wish", "want",
+    "desire", "hope", "need", "pity", "value", "crave", "loathe", "regret"
+  ],
+  "perception": [
+    "see", "hear", "smell", "taste", "feel", "look", "sound", "seem",
+    "appear", "resemble", "notice", "observe", "sense"
+  ],
+  "possession_and_relational": [
+    "have", "own", "possess", "belong", "contain", "include", "consist",
+    "involve", "depend", "matter", "weigh", "measure", "cost", "fit",
+    "lack", "owe", "exist", "require", "deserve", "suit", "pertain",
+    "differ", "equal", "signify"
+  ]
+}

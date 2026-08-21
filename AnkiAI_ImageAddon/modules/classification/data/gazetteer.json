@@ -1,0 +1,26 @@
+{
+  "countries": [
+    "vietnam", "united states", "united kingdom", "france", "germany", "japan",
+    "china", "india", "brazil", "australia", "canada", "italy", "spain",
+    "russia", "south korea", "mexico", "indonesia", "netherlands", "switzerland",
+    "sweden", "norway", "denmark", "finland", "poland", "egypt", "south africa",
+    "argentina", "new zealand", "singapore", "thailand", "malaysia", "philippines",
+    "turkey", "saudi arabia", "greece", "portugal", "ireland", "austria", "belgium"
+  ],
+  "cities": [
+    "london", "paris", "tokyo", "new york", "rome", "berlin", "beijing",
+    "moscow", "sydney", "cairo", "hanoi", "ho chi minh", "washington",
+    "seoul", "bangkok", "singapore", "los angeles", "chicago", "san francisco",
+    "toronto", "vancouver", "madrid", "barcelona", "amsterdam", "vienna",
+    "dubai", "hong kong", "taipei", "mumbai", "delhi", "kyoto", "osaka",
+    "istanbul", "athens", "stockholm", "oslo", "copenhagen", "warsaw", "prague"
+  ],
+  "landmarks_and_figures": [
+    "einstein", "newton", "shakespeare", "da vinci", "mozart", "beethoven",
+    "napoleon", "darwin", "curie", "tesla", "aristotle", "plato", "socrates",
+    "eiffel tower", "colosseum", "taj mahal", "great wall", "big ben",
+    "statue of liberty", "machu picchu", "pyramids", "parthenon",
+    "everest", "amazon", "sahara", "nile", "thames", "pacific", "atlantic",
+    "alps", "himalayas", "grand canyon", "fuji", "kilimanjaro"
+  ]
+}
