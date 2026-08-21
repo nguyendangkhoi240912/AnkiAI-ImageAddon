@@ -75,8 +75,10 @@ class ImageHandler:
         # calls inside _optimize_image() (which ran once per downloaded image)
         from .config import get_config_manager as _gcm
         _cfg = _gcm()
-        self._opt_max_width: int = int(_cfg.get("image_max_width", 600))
+        # MS §13: use long-edge limit (image_max_long_edge_px), fallback to image_max_width
+        self._opt_max_width: int = int(_cfg.get("image_max_long_edge_px", _cfg.get("image_max_width", 800)))
         self._opt_quality: int = int(_cfg.get("image_quality", 80))
+        self._opt_max_kb: int = int(_cfg.get("image_max_kb", 120))
     
     # ✨ v4.4: Pre-compiled format tuple for O(1) lookup (not O(n))
     SUPPORTED_FORMATS_TUPLE = tuple(SUPPORTED_FORMATS)
@@ -240,30 +242,27 @@ class ImageHandler:
     def _optimize_image(self, image_data: bytes, max_width: int = None,
                        quality: int = None, max_size_kb: int = 500) -> bytes:
         """
-        Optimize ảnh: resize, compress, quantize
-        Lightweight optimization focused on speed
-        
-        Args:
-            image_data: Raw image bytes
-            max_width: Max width (default from config, fallback 600)
-            quality: JPEG quality (default from config, fallback 80)
-            max_size_kb: Max file size
-        
-        Returns:
-            Optimized image bytes (usually 20-30% smaller)
+        Optimize ảnh: resize theo cạnh dài ≤800px (MS §13), JPEG q80, ≤120KB.
+
+        MS §13 chuẩn: max long edge 800px, JPEG quality 80, target ≤120KB.
+        Config keys: image_max_long_edge_px (default 800), image_quality (default 80),
+                     image_max_kb (default 120).
         """
         if not HAS_PIL:
             return image_data
 
-        # BUG-4 FIX: Use cached values from __init__ instead of calling get_config_manager() twice per image
+        # Use MS §13 defaults; config values cached at init
         if max_width is None:
-            max_width = getattr(self, "_opt_max_width", 600)
+            # Use long-edge limit from config (image_max_long_edge_px → fallback image_max_width)
+            max_width = getattr(self, "_opt_max_width", 800)
         if quality is None:
             quality = getattr(self, "_opt_quality", 80)
-        
+        # MS §13 target: ≤120KB
+        max_size_kb = getattr(self, "_opt_max_kb", 120)
+
         try:
             img = Image.open(BytesIO(image_data))
-            
+
             # Convert RGBA to RGB (faster, smaller)
             if img.mode in ('RGBA', 'LA', 'P'):
                 bg = Image.new('RGB', img.size, (255, 255, 255))
@@ -272,40 +271,38 @@ class ImageHandler:
                 else:
                     bg.paste(img)
                 img = bg
-            
-            # Resize if too large
-            if img.width > max_width:
-                ratio = max_width / img.width
-                new_height = int(img.height * ratio)
-                # Use FAST instead of LANCZOS for speed
-                img = img.resize((max_width, new_height), Image.Resampling.BILINEAR)
-            
-            # Save optimized
+
+            # MS §13: resize by LONG EDGE ≤ max_width (not just width)
+            long_edge = max(img.width, img.height)
+            if long_edge > max_width:
+                ratio = max_width / long_edge
+                new_w = max(1, int(img.width * ratio))
+                new_h = max(1, int(img.height * ratio))
+                img = img.resize((new_w, new_h), Image.Resampling.BILINEAR)
+
+            # Save optimized as JPEG
             output = BytesIO()
-            save_kwargs = {
-                'format': 'JPEG',
-                'quality': quality,
-                'optimize': True
-            }
-            
-            img.save(output, **save_kwargs)
+            img.save(output, format='JPEG', quality=quality, optimize=True)
             optimized_data = output.getvalue()
-            
-            # Check size
+
+            # Enforce ≤ max_size_kb (MS §13)
             size_kb = len(optimized_data) / 1024
             if size_kb > max_size_kb:
-                logger.warning(f"Image still large: {size_kb:.1f}KB, reducing quality")
-                output = BytesIO()
-                img.save(output, format='JPEG', quality=max(quality - 10, 70), optimize=True)
-                optimized_data = output.getvalue()
-            
+                logger.warning(f"Image {size_kb:.1f}KB > {max_size_kb}KB limit, reducing quality")
+                for q in range(quality - 10, 49, -10):
+                    output = BytesIO()
+                    img.save(output, format='JPEG', quality=q, optimize=True)
+                    optimized_data = output.getvalue()
+                    if len(optimized_data) / 1024 <= max_size_kb:
+                        break
+
             original_kb = len(image_data) / 1024
             optimized_kb = len(optimized_data) / 1024
             ratio = (1 - optimized_kb / original_kb) * 100 if original_kb > 0 else 0
             logger.info(f"Image optimized: {original_kb:.1f}KB → {optimized_kb:.1f}KB ({ratio:.1f}% reduction)")
-            
+
             return optimized_data
-        
+
         except Exception as e:
             logger.warning(f"Image optimization exception: {e}")
             return image_data  # Fallback

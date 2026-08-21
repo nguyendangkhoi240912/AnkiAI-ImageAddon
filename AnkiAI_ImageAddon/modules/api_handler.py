@@ -277,6 +277,10 @@ class AIImageProvider:
 
         if not ctx:
             try:
+                # G4.7: When pipeline.py is active, keyword gen per-card is replaced
+                # by batch classification in pipeline.process_card(). This path is kept
+                # for backward compat but should not be the primary flow going forward.
+                # TODO-v10: Remove this block once pipeline.py is wired to all callers.
                 if self.enable_ai_provider_routing:
                     ctx, _ = self.ai_provider.generate_search_context(
                         vocabulary, definition, examples

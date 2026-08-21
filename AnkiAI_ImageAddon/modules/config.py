@@ -164,6 +164,46 @@ class ConfigManager:
         # v5.1: Fewer API calls while keeping quality
         "prefer_fewer_api_calls": True,
         "max_eval_candidates": 2,
+
+        # GĐ4: LLM model names (never hardcode — always via config) [MS §21]
+        "groq_workhorse_model": "openai/gpt-oss-20b",
+        "groq_hard_model": "openai/gpt-oss-120b",
+        "groq_vision_model": "qwen/qwen3.6-27b",
+        "groq_batch_size": "auto",
+        "groq_batch_deadline_ms": 8000,
+        "gemini_vision_model": "gemini-2.0-flash-lite",
+        "ai_provider_priority": ["groq", "gemini"],
+        "qc_provider_priority": ["gemini", "groq_vision"],
+        "model_probe_on_session_start": True,
+
+        # GĐ4: Pipeline accuracy-first settings [MS §9.2, §21]
+        "vision_qc_realtime_enabled": True,
+        "vision_qc_max_rounds": 2,
+        "strict_accuracy_mode": False,
+
+        # GĐ4: Group D AI escalation threshold [MS §16, Chỉ thị 7]
+        "min_candidates_before_ai_expand": 3,
+
+        # GĐ4: Idle prefetch [MS §9.6]
+        "idle_prefetch_enabled": True,
+        "idle_prefetch_batch": 20,
+
+        # GĐ4: Image final quality settings (authoritative values, override image_handler) [MS §13]
+        "image_max_long_edge_px": 800,
+        "image_max_kb": 120,
+        "url_only_mode": False,
+
+        # GĐ4: Telemetry [MS §15]
+        "telemetry_enabled": True,
+        "reserve_interactive_quota_pct": 20,
+
+        # GĐ4: Eval [MS §20]
+        "eval_min_group_accuracy": 0.90,
+        "eval_set_version": "v1",
+
+        # GĐ4: Community cache [MS §12]
+        "community_cache_enabled": False,
+        "community_cache_url": "",
     }
     
     # Tên thư mục addon (dùng để Anki đọc/ghi config đúng)
