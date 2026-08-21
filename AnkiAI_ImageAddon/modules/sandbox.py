@@ -29,6 +29,15 @@ except (ImportError, ValueError):
     except (ImportError, ValueError):
         from AnkiAI_ImageAddon.image_providers.base_provider import Candidate
 
+# G3.3: Local SVG provider for groups K and N
+try:
+    from image_providers.local_svg_provider import get_local_svg
+except (ImportError, ValueError):
+    try:
+        from ..image_providers.local_svg_provider import get_local_svg
+    except (ImportError, ValueError):
+        from AnkiAI_ImageAddon.image_providers.local_svg_provider import get_local_svg
+
 logger = logging.getLogger("sandbox")
 
 
@@ -73,7 +82,21 @@ def format_sandbox_output(
             lines.append(
                 f"  [{idx}] Provider: {cand.provider:<12} | Score: {cand.score:.2f} | Title: {cand.title[:30]}"
             )
-            lines.append(f"      URL: {cand.url}")
+            lines.append(f"      URL: {cand.url[:80]}{'...' if len(cand.url) > 80 else ''}")
+
+    # G3.3: local SVG result
+    if verdict.visual_type == "local_svg":
+        lines.append("-" * 60)
+        lines.append("🎨  Stage 2 (local_svg): SVG generated — 0 network requests")
+        svg_cand = get_local_svg(verdict.word, verdict.group)
+        if svg_cand:
+            lines.append(f"  • Provider : {svg_cand.provider}")
+            lines.append(f"  • Size     : {svg_cand.width}×{svg_cand.height}px")
+            lines.append(f"  • License  : {svg_cand.license}")
+            url_preview = svg_cand.url[:60] + "..." if len(svg_cand.url) > 60 else svg_cand.url
+            lines.append(f"  • URL      : {url_preview}")
+        else:
+            lines.append("  ⚠ SVG generation returned None")
 
     lines.append("=" * 60)
     return "\n".join(lines)

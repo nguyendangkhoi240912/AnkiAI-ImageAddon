@@ -1,0 +1,229 @@
+{
+  "_meta": {
+    "version": 1,
+    "description": "Bảng proxy family — ẩn dụ hình ảnh cho khái niệm trừu tượng [MS §8].",
+    "schema": {
+      "group": "Nhóm khái niệm (uppercase, dùng làm lookup key)",
+      "visual_type": "diagram_or_map | metaphor_photo | gif | icon",
+      "query": "Câu truy vấn tiếng Anh gửi cho provider ảnh",
+      "alt": "Câu truy vấn dự phòng nếu query chính không có kết quả",
+      "keywords": "Từ khoá trigger để nhận diện khái niệm này từ verdict.word",
+      "notes": "Ghi chú tuỳ chọn"
+    },
+    "update_policy": "Thêm entry mới ở cuối array; không xoá entry cũ — dùng 'deprecated':true thay thế. Kết quả AI sinh (P2) được ghi ngược vào đây tự động."
+  },
+  "entries": [
+    {
+      "group": "STRATEGY",
+      "visual_type": "diagram_or_map",
+      "query": "military tactics map attack arrows",
+      "alt": "chess board strategy game",
+      "keywords": ["strategy", "tactics", "strategic", "tactic"],
+      "notes": "Regression test target — must outrank 'coach shouting' photo"
+    },
+    {
+      "group": "TACTICS",
+      "visual_type": "diagram_or_map",
+      "query": "military tactics map attack arrows",
+      "alt": "football tactics formation diagram",
+      "keywords": ["tactic", "tactics", "tactical"],
+      "notes": "Alias for STRATEGY group"
+    },
+    {
+      "group": "PLAN",
+      "visual_type": "diagram_or_map",
+      "query": "project plan flowchart diagram",
+      "alt": "blueprint architectural plan drawing",
+      "keywords": ["plan", "planning", "blueprint", "roadmap"]
+    },
+    {
+      "group": "WORKFLOW",
+      "visual_type": "diagram_or_map",
+      "query": "workflow process flowchart diagram blocks arrows",
+      "alt": "business process flow diagram",
+      "keywords": ["workflow", "process", "procedure", "pipeline", "flowchart"]
+    },
+    {
+      "group": "NEGOTIATION",
+      "visual_type": "diagram_or_map",
+      "query": "negotiation table top view two sides arrows",
+      "alt": "business deal handshake diagram",
+      "keywords": ["negotiation", "negotiate", "bargain", "mediation"]
+    },
+    {
+      "group": "SUPPLY_CHAIN",
+      "visual_type": "diagram_or_map",
+      "query": "supply chain diagram factory warehouse store arrows",
+      "alt": "logistics network flow diagram",
+      "keywords": ["supply chain", "logistics", "distribution", "procurement"]
+    },
+    {
+      "group": "TIME",
+      "visual_type": "metaphor_photo",
+      "query": "hourglass sand flowing time",
+      "alt": "calendar clock time concept",
+      "keywords": ["time", "delay", "deadline", "duration", "schedule"]
+    },
+    {
+      "group": "CHANGE",
+      "visual_type": "metaphor_photo",
+      "query": "caterpillar butterfly transformation metamorphosis",
+      "alt": "seedling growing plant before after",
+      "keywords": ["change", "transform", "transition", "evolve", "shift"]
+    },
+    {
+      "group": "GROWTH",
+      "visual_type": "metaphor_photo",
+      "query": "seedling growing plant sprout",
+      "alt": "upward arrow graph growth",
+      "keywords": ["growth", "grow", "expand", "develop", "progress"]
+    },
+    {
+      "group": "CAUSE_EFFECT",
+      "visual_type": "metaphor_photo",
+      "query": "dominoes falling chain reaction",
+      "alt": "cause effect diagram arrows",
+      "keywords": ["cause", "effect", "consequence", "result", "impact", "trigger"]
+    },
+    {
+      "group": "RISK",
+      "visual_type": "metaphor_photo",
+      "query": "dice rolling chance risk uncertainty",
+      "alt": "person walking tightrope risk",
+      "keywords": ["risk", "danger", "hazard", "uncertainty", "gamble"]
+    },
+    {
+      "group": "LAW",
+      "visual_type": "metaphor_photo",
+      "query": "scales of justice court balance",
+      "alt": "gavel judge courtroom legal",
+      "keywords": ["law", "justice", "legal", "court", "regulation", "rule"]
+    },
+    {
+      "group": "FREEDOM",
+      "visual_type": "metaphor_photo",
+      "query": "broken chains freedom liberation",
+      "alt": "open birdcage bird flying free",
+      "keywords": ["freedom", "free", "liberty", "liberation", "independence"]
+    },
+    {
+      "group": "KNOWLEDGE",
+      "visual_type": "metaphor_photo",
+      "query": "lightbulb glowing idea knowledge",
+      "alt": "open book knowledge learning",
+      "keywords": ["knowledge", "idea", "insight", "wisdom", "learn", "education"]
+    },
+    {
+      "group": "MONEY",
+      "visual_type": "metaphor_photo",
+      "query": "gold coins stack wealth money",
+      "alt": "stock market chart rising economy",
+      "keywords": ["money", "wealth", "economy", "finance", "profit", "revenue"]
+    },
+    {
+      "group": "TEAMWORK",
+      "visual_type": "metaphor_photo",
+      "query": "hands joined together teamwork cooperation",
+      "alt": "puzzle pieces fitting together teamwork",
+      "keywords": ["teamwork", "collaboration", "cooperation", "together", "unity"]
+    },
+    {
+      "group": "DANGER",
+      "visual_type": "metaphor_photo",
+      "query": "warning triangle sign danger caution",
+      "alt": "red alert symbol danger",
+      "keywords": ["danger", "warning", "hazard", "threat", "peril"]
+    },
+    {
+      "group": "BALANCE",
+      "visual_type": "metaphor_photo",
+      "query": "seesaw balance equilibrium",
+      "alt": "balance scale weighing",
+      "keywords": ["balance", "equilibrium", "stability", "proportion", "harmony"]
+    },
+    {
+      "group": "COMMUNICATION",
+      "visual_type": "metaphor_photo",
+      "query": "speech bubbles conversation dialogue",
+      "alt": "two people talking communication",
+      "keywords": ["communication", "dialogue", "conversation", "message", "discuss"]
+    },
+    {
+      "group": "CREATIVITY",
+      "visual_type": "metaphor_photo",
+      "query": "lightbulb pencil creative thinking",
+      "alt": "colorful paint brush art creativity",
+      "keywords": ["creativity", "creative", "imagination", "innovate", "invent"]
+    },
+    {
+      "group": "COMPETITION",
+      "visual_type": "metaphor_photo",
+      "query": "race track runners competing",
+      "alt": "chess players competition game",
+      "keywords": ["competition", "compete", "rival", "contest", "race"]
+    },
+    {
+      "group": "TRUST",
+      "visual_type": "metaphor_photo",
+      "query": "handshake trust agreement partnership",
+      "alt": "bridge connecting two sides trust",
+      "keywords": ["trust", "faith", "reliable", "confidence", "loyalty"]
+    },
+    {
+      "group": "CONFLICT",
+      "visual_type": "metaphor_photo",
+      "query": "two forces collision conflict opposing arrows",
+      "alt": "crossed swords conflict confrontation",
+      "keywords": ["conflict", "clash", "dispute", "argument", "tension", "oppose"]
+    },
+    {
+      "group": "SOLUTION",
+      "visual_type": "metaphor_photo",
+      "query": "key unlocking padlock solution",
+      "alt": "puzzle last piece solution complete",
+      "keywords": ["solution", "solve", "resolve", "answer", "fix"]
+    },
+    {
+      "group": "PRESSURE",
+      "visual_type": "metaphor_photo",
+      "query": "weight pressure heavy burden shoulder",
+      "alt": "compressed spring force pressure",
+      "keywords": ["pressure", "stress", "burden", "strain", "force"]
+    },
+    {
+      "group": "OPPORTUNITY",
+      "visual_type": "metaphor_photo",
+      "query": "open door light opportunity path",
+      "alt": "key and lock opportunity unlock",
+      "keywords": ["opportunity", "chance", "possibility", "potential"]
+    },
+    {
+      "group": "FAILURE",
+      "visual_type": "metaphor_photo",
+      "query": "broken bridge gap failure collapse",
+      "alt": "crumbling wall failure breakdown",
+      "keywords": ["failure", "fail", "collapse", "breakdown", "defeat"]
+    },
+    {
+      "group": "SUCCESS",
+      "visual_type": "metaphor_photo",
+      "query": "mountain summit flag success achievement",
+      "alt": "trophy award success winner",
+      "keywords": ["success", "achieve", "accomplish", "victory", "win"]
+    },
+    {
+      "group": "POWER",
+      "visual_type": "metaphor_photo",
+      "query": "lightning bolt energy power force",
+      "alt": "strong arm flex muscle power",
+      "keywords": ["power", "strength", "force", "authority", "control"]
+    },
+    {
+      "group": "ISOLATION",
+      "visual_type": "metaphor_photo",
+      "query": "single tree alone field isolation",
+      "alt": "island isolated surrounded water",
+      "keywords": ["isolation", "alone", "solitary", "separate", "detach"]
+    }
+  ]
+}
