@@ -170,19 +170,33 @@ def build_addon(output_dir=None):
     print(f"📤 Output: {output_file}")
     
     # Tạo zip file
+    excluded_dirs = {"__pycache__", "models", "logs"}
+    excluded_exts = {".pyc", ".pyo", ".pyd", ".sqlite", ".sqlite-wal", ".sqlite-shm"}
+
     try:
         with zipfile.ZipFile(output_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
             # Add tất cả files từ addon_root
             for root, dirs, files in os.walk(addon_root):
-                for file in files:
-                    # Skip __pycache__ và .pyc files
-                    if '__pycache__' in root or file.endswith('.pyc'):
+                # Prune excluded dirs in-place
+                dirs[:] = [d for d in sorted(dirs) if d not in excluded_dirs]
+
+                rel_dir = Path(root).relative_to(addon_root)
+                is_user_files = rel_dir == Path("user_files") or (rel_dir.parts and rel_dir.parts[0] == "user_files")
+
+                for file in sorted(files):
+                    if any(file.endswith(ext) for ext in excluded_exts):
                         continue
-                    
+                    if file.startswith(".DS_Store") or file.endswith(".log"):
+                        continue
+
+                    # Inside user_files/, only package .gitkeep (not runtime data/cache)
+                    if is_user_files and file != ".gitkeep":
+                        continue
+
                     file_path = Path(root) / file
                     # Anki add-ons: archive path không include folder name
                     arcname = file_path.relative_to(addon_root)
-                    
+
                     print(f"  ✓ Added: {arcname}")
                     zipf.write(file_path, arcname)
         
