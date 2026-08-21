@@ -128,3 +128,80 @@ def ensure_spacy_installed(model_name: str = "en_core_web_sm") -> bool:
     except (ImportError, OSError):
         logger.debug("spaCy model '%s' not available; using pure Python fallback datasets.", model_name)
         return False
+
+
+# ---------------------------------------------------------------------------
+# GĐ2, G2.4 — CLIP ONNX model download helpers
+# ---------------------------------------------------------------------------
+# Model hosted on Hugging Face Hub.
+# URLs and sha256 here are placeholders — replace with final verified values
+# before packaging for release.  The addon checks sha256 if non-empty.
+CLIP_MODELS: Dict[str, Dict] = {
+    "clip-vit-b32-fp16.onnx": {
+        "url": "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/onnx/model_fp16.onnx",
+        "sha256": "",   # TODO: fill in once release URL is confirmed
+        "tier": "full",
+    },
+    "clip-vit-b32-int8.onnx": {
+        "url": "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/onnx/model_quantized.onnx",
+        "sha256": "",   # TODO: fill in
+        "tier": "quantized",
+    },
+}
+
+
+def ensure_clip_model(
+    tier: str = "full",
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    models_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Download the requested CLIP ONNX model to MODELS_DIR if not already present.
+
+    Args:
+        tier: "full" (fp16) or "quantized" (int8).
+        progress_callback: Optional (bytes_done, total_bytes) callback.
+        models_dir: Override default MODELS_DIR (for tests).
+
+    Returns:
+        Path to the model file, or None if download failed or was skipped.
+    """
+    dest_dir = Path(models_dir) if models_dir else MODELS_DIR
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Find the matching model spec
+    spec = next(
+        (info for name, info in CLIP_MODELS.items() if info["tier"] == tier),
+        None,
+    )
+    if spec is None:
+        logger.error("Unknown CLIP tier: %s", tier)
+        return None
+
+    filename = next(name for name, info in CLIP_MODELS.items() if info["tier"] == tier)
+    target = dest_dir / filename
+
+    if target.exists():
+        if not spec["sha256"]:
+            logger.info("CLIP model already present (skipping checksum — sha256 not set): %s", target)
+            return target
+        existing_sha = compute_file_sha256(target)
+        if existing_sha.lower() == spec["sha256"].lower():
+            logger.info("CLIP model already present and verified: %s", target)
+            return target
+        logger.warning("CLIP model checksum mismatch, re-downloading: %s", target)
+
+    logger.info("Downloading CLIP model (%s) from %s ...", tier, spec["url"])
+    try:
+        path = download_file_with_resume(
+            url=spec["url"],
+            target_path=target,
+            expected_sha256=spec["sha256"] or None,
+            progress_callback=progress_callback,
+        )
+        return path
+    except DownloadError as exc:
+        logger.error("CLIP model download failed: %s", exc)
+        return None
+    except Exception as exc:
+        logger.error("Unexpected error downloading CLIP model: %s", exc)
+        return None

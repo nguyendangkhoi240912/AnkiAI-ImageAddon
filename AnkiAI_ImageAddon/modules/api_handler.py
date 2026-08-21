@@ -122,6 +122,22 @@ class AIImageProvider:
         self.enable_ai_provider_routing = enable_ai_provider_routing
         self.enable_ai_evaluation = enable_ai_evaluation
         self.enable_smart_selection = enable_smart_selection
+        # G2.3: track whether CLIP reranker is active for this instance
+        self._enable_clip_reranker = bool(
+            (provider_config or {}).get("enable_clip_reranker", False)
+        )
+
+        # G2.3: When CLIP reranker is enabled, skip Gemini image evaluator entirely.
+        # enable_clip_reranker is passed in via provider_config (config key from GĐ2).
+        _clip_reranker_active = bool(
+            (provider_config or {}).get("enable_clip_reranker", False)
+        )
+        if _clip_reranker_active and enable_ai_evaluation:
+            logger.info(
+                "CLIP reranker active — skipping GeminiImageEvaluator init "
+                "(enable_ai_evaluation overridden by enable_clip_reranker)"
+            )
+            enable_ai_evaluation = False
 
         self.image_evaluator = None
         if enable_ai_evaluation:
@@ -361,7 +377,26 @@ class AIImageProvider:
             )
             # #endregion
 
-            if len(candidate_urls) == 1 or not (
+            # G2.3: If CLIP reranker is active, use it instead of Gemini eval.
+            _clip_active = getattr(self, "_enable_clip_reranker", False)
+            if _clip_active and len(candidate_urls) > 1:
+                try:
+                    from AnkiAI_ImageAddon.modules.classification.clip_scorer import get_clip_scorer
+                    from AnkiAI_ImageAddon.modules.reranker import rerank
+                    from AnkiAI_ImageAddon.image_providers.base_provider import Candidate
+                    _cands = [
+                        Candidate(url=u, provider="unknown", visual_type="photo")
+                        for u in candidate_urls
+                    ]
+                    class _MinVerdict:
+                        group = "A"
+                        en_query = vocabulary
+                    _ranked = rerank(_cands, _MinVerdict(), get_clip_scorer())
+                    best_url = _ranked[0].url
+                except Exception as _clip_err:
+                    logger.warning(f"CLIP reranker failed: {_clip_err} — using first result")
+                    best_url = candidate_urls[0]
+            elif len(candidate_urls) == 1 or not (
                 self.enable_ai_evaluation and self.image_evaluator
             ):
                 best_url = candidate_urls[0]

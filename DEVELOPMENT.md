@@ -401,3 +401,41 @@ If import fails, you'll see the error.
 ---
 
 **Happy coding!** 🚀
+
+---
+
+## GĐ2 — Dependency strategy (CLIP + NLP)  [MS §10, G2.7]
+
+### Nguyên tắc chung
+Addon **không bundle** model nặng vào `.ankiaddon`.
+Tất cả model được tải về `user_files/models/` lần đầu khi người dùng dùng tính năng,
+có sha256 verification + HTTP resume (qua `modules/model_downloader.py`).
+
+### Danh sách optional deps và cách cài
+
+| Package | Khi nào cần | Cách cài | Nếu thiếu |
+|---------|------------|----------|-----------|
+| `onnxruntime` | CLIP Tier 1/2 (full/quantized) | `pip install onnxruntime` | Tự động xuống Tier 3 (heuristic) |
+| `numpy` | CLIP ONNX inference | Thường kèm onnxruntime | Như trên |
+| `Pillow` | Nén ảnh trước `writeData()` | Anki 2.1.50+ bundle sẵn | Bỏ qua optimize |
+| `nltk` + WordNet | Phân loại nhóm B (tần suất nghĩa) | `pip install nltk` rồi `python -c "import nltk; nltk.download('wordnet')"` | Fallback rule-based |
+| `spacy` + `en_core_web_sm` | POS tagging chính xác | `pip install spacy && python -m spacy download en_core_web_sm` | Regex POS đơn giản |
+| `imagehash` | Chống trùng ảnh trong deck | `pip install ImageHash` | Bỏ qua dedup |
+
+### Môi trường phát triển
+```bash
+# Cài đủ deps để chạy test:
+pip install onnxruntime numpy Pillow nltk imagehash pytest
+
+# Tải WordNet (offline, cần 1 lần):
+python -c "import nltk; nltk.download('wordnet'); nltk.download('omw-1.4')"
+```
+
+### Môi trường production (Anki)
+- Không dùng `pip install` từ addon — Anki quản lý Python riêng.
+- Deps được kiểm tra lazy khi cần; nếu thiếu → log warning + fallback, **không crash**.
+- ONNX model CLIP được tải theo yêu cầu qua `model_downloader.ensure_clip_model()`.
+
+### CLIP model URLs
+Xem `modules/model_downloader.py` → `CLIP_MODELS` dict.
+SHA256 checksums cần được fill in trước release (hiện để trống = bỏ qua verify).

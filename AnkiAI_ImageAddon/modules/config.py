@@ -19,10 +19,31 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+CURRENT_CONFIG_VERSION = 9
+
+
 class ConfigManager:
     """Quản lý cấu hình của add-on - v4.0"""
-    
+
     DEFAULT_CONFIG = {
+        # Config version — used by upgrader to apply migrations
+        "config_version": 9,
+
+        # GĐ2: CLIP reranker settings [MS §10, §21]
+        "clip_tier": "auto",           # "auto" | "full" | "quantized" | "heuristic"
+        "clip_confidence_threshold": 0.30,
+        "clip_topk_candidates": 12,
+        "enable_clip_reranker": False,  # True once G2.1+G2.2 verified; disables Gemini eval
+
+        # GĐ2+: Pipeline budget settings [MS §9.2, §21]
+        "card_latency_budget_ms": 4000,
+        "round2_min_remaining_ms": 2000,
+        "groq_realtime_deadline_ms": 1800,
+        "groq_batch_deadline_ms": 8000,
+        "min_candidates_before_ai_expand": 3,  # Group D AI escalation threshold [MS §16, Chỉ thị 7]
+
+        # Legacy key guard — read but ignored with warning
+        # "tenor_api_key" handled in provider_registry.py
         # AI Providers (v4.2)
         "gemini_api_key": "",
         "gemini_backup_api_key": "",  # ✨ Key #3 for backup
@@ -166,9 +187,9 @@ class ConfigManager:
         self.config = self._load_config()
     
     def _load_config(self) -> Dict[str, Any]:
-        """Load config: merge defaults + meta.json user overrides"""
+        """Load config: merge defaults + meta.json user overrides, then run upgrader."""
         config = self.DEFAULT_CONFIG.copy()
-        
+
         # PRIMARY: read meta.json directly (most reliable)
         try:
             addon_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -179,19 +200,69 @@ class ConfigManager:
                 user_config = meta.get("config", {})
                 if user_config:
                     config.update(user_config)
+                    config = self._upgrade_config(config)
                     return config
         except Exception as e:
             logger.debug(f"Failed to load meta.json: {e}")
-        
+
         # FALLBACK: Anki's getConfig API
         try:
             anki_config = mw.addonManager.getConfig(self.ADDON_MODULE)
             if anki_config:
                 config.update(anki_config)
+                config = self._upgrade_config(config)
                 return config
         except Exception as e:
             logger.debug(f"Failed to load config via addonManager: {e}")
-        
+
+        return config
+
+    def _upgrade_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply incremental migrations to bring user config up to CURRENT_CONFIG_VERSION.
+
+        - Keys in user config not present in DEFAULT_CONFIG → warn + strip (unknown key).
+        - Keys missing from user config → backfill from DEFAULT_CONFIG.
+        - Version-specific migrations run in order (v0→v9 handled as a single catch-all
+          since there is no prior versioned schema; future agents add _migrate_v9_to_v10 etc.)
+        """
+        stored_version = config.get("config_version", 0)
+
+        # Backfill any missing keys with defaults
+        for key, default_val in self.DEFAULT_CONFIG.items():
+            if key not in config:
+                config[key] = default_val
+
+        # Warn about and strip unknown keys (keys not in DEFAULT_CONFIG)
+        unknown_keys = [k for k in list(config.keys()) if k not in self.DEFAULT_CONFIG]
+        # Allow well-known legacy guards that are intentionally kept out of DEFAULT_CONFIG
+        _legacy_allowed = {"tenor_api_key"}
+        for k in unknown_keys:
+            if k not in _legacy_allowed:
+                logger.warning(f"Unknown config key '{k}' (not in DEFAULT_CONFIG) — ignoring")
+                config.pop(k, None)
+
+        # Version-specific migrations
+        if stored_version < 9:
+            config = self._migrate_to_v9(config)
+
+        config["config_version"] = CURRENT_CONFIG_VERSION
+        return config
+
+    def _migrate_to_v9(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Migrations from any pre-v9 schema to v9.
+
+        - Renames / type-casts that are safe to apply unconditionally.
+        - Does NOT touch user API keys or provider selections.
+        """
+        # image_max_width → still valid; ensure int
+        if "image_max_width" in config:
+            try:
+                config["image_max_width"] = int(config["image_max_width"])
+            except (ValueError, TypeError):
+                config["image_max_width"] = self.DEFAULT_CONFIG["image_max_width"]
+
+        # clip keys guaranteed present after backfill above; nothing extra to migrate
+        logger.info("Config migrated to v9")
         return config
     
     def reload(self):
