@@ -43,7 +43,6 @@ from .providers import (  # noqa: F401
     BioiconsProvider,
     KLIPYProvider,
     GIPHYProvider,
-    TenorProvider,
     PixabayAnimatedProvider,
     IconScoutProvider,
     HPAPIProvider,
@@ -182,7 +181,6 @@ class ImageScore:
         "europeana": 68,
         "klipy": 86,
         "giphy": 80,
-        "tenor": 79,
         "pixabay_animated": 77,
         "iconscout": 76,
     }
@@ -365,7 +363,6 @@ class SmartImageSelector:
             "duckduckgo",
             "codecogs",
             "giphy",
-            "tenor",
         }
         medium = {
             "openverse",

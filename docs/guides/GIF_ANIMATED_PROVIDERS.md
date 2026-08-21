@@ -133,50 +133,26 @@ Addon đã tích hợp **5 nền tảng cung cấp ảnh động (GIF)** chuyên
 
 ---
 
-### 5. ⏳ Tenor - Thư viện ảnh động khổng lồ từ Google
-
-#### Đặc điểm nổi bật:
-- Kho lưu trữ **GIF và Sticker cực kỳ phổ biến**
-- Tích hợp vào bàn phím ảo và ứng dụng nhắn tin
-- Công cụ tìm kiếm thông minh
-
-#### Điểm mạnh cho Anki:
-- **Gợi ý từ khóa liên quan** thông minh
-- Tìm kiếm và lọc nội dung vô cùng tinh tế
-- Ví dụ: "evil smile", "big smile" khi gõ "smile"
+### 5. ❌ Tenor (Đã ngừng hoạt động)
 
 #### ⚠️ Lưu ý quan trọng:
-**Google đã thông báo kế hoạch đóng cửa API Tenor vào 30 tháng 6 năm 2026**
+**Google đã chính thức đóng cửa API Tenor vào ngày 30 tháng 6 năm 2026.**
+Addon đã gỡ bỏ hoàn toàn Tenor Provider. Nếu trong file cấu hình cũ vẫn còn `tenor_api_key`, addon sẽ tự động bỏ qua và ghi cảnh báo log mà không gây lỗi ứng dụng.
 
-💡 **Khuyến nghị**: Nếu xây dựng tự động hóa, hãy ưu tiên các nền tảng khác như KLIPY hoặc Pixabay
-
-#### Cách lấy API Key:
-1. Truy cập: https://tenor.com/developer
-2. Tạo app mới
-3. Xin API key
-4. Copy vào config (nhanh - thời gian có hạn!)
-
-#### Cấu hình:
-```json
-{
-    "tenor_api_key": "YOUR_TENOR_API_KEY_HERE"
-}
-```
-
-#### Giá cả:
-- **Miễn phí** (sẽ đóng cửa 30-06-2026)
+💡 **Khuyến nghị**: Hãy sử dụng các nền tảng thay thế:
+- **KLIPY**: Rất tốt cho từ vựng và đa ngôn ngữ.
+- **Pixabay / GIPHY**: Thư viện ảnh động đa dạng, chất lượng cao.
 
 ---
 
 ## 🛠️ Cấu hình hoàn chỉnh
 
-Dưới đây là cấu hình đầy đủ để sử dụng tất cả GIF provider:
+Dưới đây là cấu hình đầy đủ để sử dụng các GIF provider hiện hành:
 
 ```json
 {
     "klipy_app_key": "YOUR_KLIPY_KEY",
     "giphy_api_key": "YOUR_GIPHY_KEY",
-    "tenor_api_key": "YOUR_TENOR_KEY",
     "pixabay_api_key": "YOUR_PIXABAY_KEY",
     "iconscout_api_token": "YOUR_ICONSCOUT_TOKEN",
     
@@ -244,17 +220,16 @@ Cấu hình `"auto_add_on_sync": true` để addon tự động tìm và thêm G
 
 ## 📊 So sánh các Provider
 
-| Feature | KLIPY | Pixabay | IconScout | GIPHY | Tenor |
-|---------|-------|---------|-----------|-------|-------|
-| **Miễn phí** | ✅ | ✅ | Giới hạn | ✅ (Beta) | ✅* |
-| **Localization** | ✅✅✅ | ❌ | ❌ | ❌ | ❌ |
-| **Biểu tượng động** | ❌ | ❌ | ✅✅✅ | ❌ | ❌ |
-| **Số lượng GIF** | Lớn | Rất lớn | Khổng lồ | Khổng lồ | Khổng lồ |
-| **Bản quyền** | Tốt | Tuyệt vời | Tốt | Trung bình | Trung bình |
-| **Tính ổn định** | Cao | Cao | Cao | Cao | Thấp** |
+| Feature | KLIPY | Pixabay | IconScout | GIPHY |
+|---------|-------|---------|-----------|-------|
+| **Miễn phí** | ✅ | ✅ | Giới hạn | ✅ (Beta) |
+| **Localization** | ✅✅✅ | ❌ | ❌ | ❌ |
+| **Biểu tượng động** | ❌ | ❌ | ✅✅✅ | ❌ |
+| **Số lượng GIF** | Lớn | Rất lớn | Khổng lồ | Khổng lồ |
+| **Bản quyền** | Tốt | Tuyệt vời | Tốt | Trung bình |
+| **Tính ổn định** | Cao | Cao | Cao | Cao |
 
-*Tenor đóng cửa 30-06-2026
-**API shape có thể thay đổi
+*(Tenor đã đóng cửa 30-06-2026 và không còn trong danh sách)*
 
 ---
 
@@ -295,7 +270,6 @@ Cấu hình `"auto_add_on_sync": true` để addon tự động tìm và thêm G
 - **Pixabay**: https://pixabay.com/api/
 - **IconScout**: https://iconscout.com/api
 - **GIPHY**: https://developers.giphy.com
-- **Tenor**: https://tenor.com/developer
 
 ---
 

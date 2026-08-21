@@ -33,7 +33,6 @@ from .providers import (
     BioiconsProvider,
     KLIPYProvider,
     GIPHYProvider,
-    TenorProvider,
     PixabayAnimatedProvider,
     IconScoutProvider,
     HPAPIProvider,
@@ -66,7 +65,6 @@ DOMAIN_PROVIDERS: Dict[str, List[str]] = {
         "europeana",
         "klipy",
         "giphy",
-        "tenor",
         "pixabay_animated",
         "iconscout",
         "hp_api",
@@ -79,7 +77,6 @@ DOMAIN_PROVIDERS: Dict[str, List[str]] = {
     "animated": [
         "klipy",
         "giphy",
-        "tenor",
         "pixabay_animated",
         "iconscout",
         "waifu_pics",
@@ -95,7 +92,7 @@ DOMAIN_PROVIDERS: Dict[str, List[str]] = {
 }
 
 FALLBACK_PROVIDERS = ["openverse", "wikimedia", "duckduckgo"]
-ANIMATED_FALLBACK_PROVIDERS = ["giphy", "tenor"]
+ANIMATED_FALLBACK_PROVIDERS = ["giphy", "pixabay_animated"]
 
 VALID_DOMAINS = set(DOMAIN_PROVIDERS.keys())
 
@@ -172,7 +169,8 @@ def build_smart_selector(
     openverse_token = config.get("openverse_api_token", "")
     klipy_key = config.get("klipy_app_key", "")
     giphy_key = config.get("giphy_api_key", "")
-    tenor_key = config.get("tenor_api_key", "")
+    if config.get("tenor_api_key"):
+        logger.warning("Ignoring legacy tenor_api_key: Tenor is no longer supported")
     iconscout_token = config.get("iconscout_api_token", "")
 
     if pexels_key:
@@ -217,11 +215,6 @@ def build_smart_selector(
         _try_add(selector, "klipy", lambda: KLIPYProvider(klipy_key))
     if giphy_key:
         _try_add(selector, "giphy", lambda: GIPHYProvider(giphy_key))
-    # Tenor deprecated after 2026-06-30
-    if tenor_key and not is_tenor_deprecated():
-        _try_add(selector, "tenor", lambda: TenorProvider(tenor_key))
-    elif tenor_key and is_tenor_deprecated():
-        logger.warning("Tenor API deprecated after 2026-06-30, skipping registration")
     if pixabay_key:
         _try_add(selector, "pixabay_animated", lambda: PixabayAnimatedProvider(pixabay_key))
     _try_add(selector, "iconscout", lambda: IconScoutProvider(iconscout_token))
@@ -268,7 +261,6 @@ def has_any_image_provider(config: Dict[str, Any]) -> bool:
             "noun_project_api_key",
             "klipy_app_key",
             "giphy_api_key",
-            "tenor_api_key",
             "iconscout_api_token",
         )
     )
@@ -282,15 +274,7 @@ def has_any_animated_provider(config: Dict[str, Any]) -> bool:
         for k in (
             "klipy_app_key",
             "giphy_api_key",
-            "tenor_api_key",
             "pixabay_api_key",
             "iconscout_api_token",
         )
     )
-
-
-def is_tenor_deprecated() -> bool:
-    """Check if Tenor API is past its deprecation date (2026-06-30)."""
-    from datetime import datetime
-    deprecation_date = datetime(2026, 6, 30)
-    return datetime.now() > deprecation_date

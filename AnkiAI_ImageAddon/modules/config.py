@@ -108,7 +108,6 @@ class ConfigManager:
         # Animated/GIF search API keys (v5.0)
         "klipy_app_key": "",
         "giphy_api_key": "",
-        "tenor_api_key": "",
         "iconscout_api_token": "",
 
         # Gemini image description keys (v5.0)

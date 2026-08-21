@@ -1,4 +1,4 @@
-"""Unit tests for animated image providers (KLIPY, GIPHY, Tenor, PixabayAnimated, IconScout)."""
+"""Unit tests for animated image providers (KLIPY, GIPHY, PixabayAnimated, IconScout)."""
 
 import pytest
 from unittest.mock import Mock, patch
@@ -7,7 +7,6 @@ import requests
 from AnkiAI_ImageAddon.modules.providers.animated import (
     KLIPYProvider,
     GIPHYProvider,
-    TenorProvider,
     PixabayAnimatedProvider,
     IconScoutProvider,
 )
@@ -111,41 +110,6 @@ class TestGIPHYProvider:
 
             assert len(results) == 1
             assert "giphy.com" in results[0]["url"]
-
-
-class TestTenorProvider:
-    """Tests for TenorProvider."""
-
-    def test_init_requires_key(self):
-        """Test that TenorProvider requires an API key."""
-        with pytest.raises(ImageProviderError, match="Tenor API key required"):
-            TenorProvider("")
-
-    def test_search_success(self):
-        """Test successful search returns image URLs."""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "results": [
-                {
-                    "content_description": "happy smile",
-                    "media_formats": {
-                        "gif": {"url": "https://tenor.com/happy.gif"}
-                    }
-                }
-            ]
-        }
-
-        with patch("AnkiAI_ImageAddon.modules.providers.animated._ImageProviderSessionManager.get_session") as mock_session_mgr:
-            mock_session = Mock()
-            mock_session.get.return_value = mock_response
-            mock_session_mgr.return_value = mock_session
-
-            provider = TenorProvider("test_key")
-            results = provider.search("smile", per_page=1)
-
-            assert len(results) == 1
-            assert "tenor.com" in results[0]["url"]
 
 
 class TestPixabayAnimatedProvider:
