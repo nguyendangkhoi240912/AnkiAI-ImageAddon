@@ -97,6 +97,7 @@ def process_card(
     clip=None,
     quota=None,
     search_fn=None,  # callable(query, visual_type, top_n) -> list[Candidate]
+    cache=None,      # CacheManager or None (None → auto-get or skip on error)
 ) -> CardResult:
     """
     Full pipeline for one card (§9.1 + §9.2).
@@ -130,9 +131,38 @@ def process_card(
         strict_mode = config.get("strict_accuracy_mode", False)
 
     # ------------------------------------------------------------------
-    # Step 1: Cache L1 check (placeholder — GĐ5 implements SQLite cache)
+    # Step 1: Cache L1 check (SQLite — GĐ5)
     # ------------------------------------------------------------------
-    # TODO-v5: cache.lookup(word, sentence) → CardResult if hit
+    if cache is not None:
+        try:
+            hit = cache.lookup_card(word)
+            if hit is not None:
+                return CardResult(
+                    url=hit["url"],
+                    verified=hit["verified"],
+                    qc_rounds=hit["qc_rounds"],
+                    resolved_by=hit["resolved_by"],
+                    flagged=hit["flagged"],
+                    latency_ms=int(gov.elapsed_ms()),
+                )
+        except Exception:
+            pass  # cache unavailable → proceed normally
+    else:
+        try:
+            from AnkiAI_ImageAddon.modules.cache import get_cache_manager
+            cm = get_cache_manager()
+            hit = cm.lookup_card(word)
+            if hit is not None:
+                return CardResult(
+                    url=hit["url"],
+                    verified=hit["verified"],
+                    qc_rounds=hit["qc_rounds"],
+                    resolved_by=hit["resolved_by"],
+                    flagged=hit["flagged"],
+                    latency_ms=int(gov.elapsed_ms()),
+                )
+        except Exception:
+            pass  # cache unavailable → proceed normally
 
     # ------------------------------------------------------------------
     # Step 2: Classify (100% local)
@@ -342,8 +372,36 @@ def process_card(
                 break
 
     # ------------------------------------------------------------------
-    # Step 7: Degrade outcome
+    # Step 7: Degrade outcome + cache store
     # ------------------------------------------------------------------
+    def _store_to_cache(result: CardResult) -> None:
+        """Best-effort store into L1 cache; never raises."""
+        if result.url is None:
+            return
+        try:
+            cm = cache
+            if cm is None:
+                from AnkiAI_ImageAddon.modules.cache import get_cache_manager
+                cm = get_cache_manager()
+            provider_name = ""
+            if candidates:
+                provider_name = candidates[0].provider
+            cm.store_card_result(
+                word=word,
+                sense_id=verdict.sense_id or "",
+                group=verdict.group,
+                visual_type=verdict.visual_type,
+                image_url=result.url,
+                clip_score=0.0,  # rerank score not surfaced here yet
+                qc_verified=result.verified,
+                qc_rounds=result.qc_rounds,
+                source_provider=provider_name,
+                resolved_by=result.resolved_by,
+                flagged=result.flagged,
+            )
+        except Exception:
+            pass  # cache unavailable → skip silently
+
     if not verified:
         if strict_mode:
             # strict: return no URL, queue for background retry
@@ -354,16 +412,20 @@ def process_card(
                 latency_ms=int(gov.elapsed_ms()),
             )
         # default: attach best candidate with ⚠ flag
-        return CardResult(
+        result = CardResult(
             url=best_url, verified=False, qc_rounds=qc_rounds,
             resolved_by="|".join(resolved_by_parts) + "|unverified",
             flagged=True,
             latency_ms=int(gov.elapsed_ms()),
         )
+        _store_to_cache(result)
+        return result
 
-    return CardResult(
+    result = CardResult(
         url=best_url, verified=True, qc_rounds=qc_rounds,
         resolved_by="|".join(resolved_by_parts),
         flagged=False,
         latency_ms=int(gov.elapsed_ms()),
     )
+    _store_to_cache(result)
+    return result

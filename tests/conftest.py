@@ -158,3 +158,29 @@ def minimal_config():
         "enable_ai_provider_routing": False,
         "max_concurrent_providers": 5,
     }
+
+
+@pytest.fixture(autouse=True)
+def reset_cache_singleton(tmp_path):
+    """Ensure each test starts with a fresh, isolated cache in tmp_path."""
+    import tempfile
+    from AnkiAI_ImageAddon.modules.cache import CacheManager, reset_cache_manager, _global_cm
+    
+    # Create temp cache dir for this test
+    cache_dir = tmp_path / "user_files"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create isolated cache manager
+    test_cache = CacheManager(str(cache_dir))
+    
+    # Temporarily replace global singleton
+    import AnkiAI_ImageAddon.modules.cache as cache_module
+    old_cm = cache_module._global_cm
+    cache_module._global_cm = test_cache
+    
+    yield test_cache
+    
+    # Cleanup
+    cache_module._global_cm = old_cm
+    test_cache.close()
+    reset_cache_manager()
