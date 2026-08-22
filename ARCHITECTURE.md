@@ -1,480 +1,385 @@
-# 🏗️ Kiến trúc AnkiAI Add-on
+# 🏗️ Kiến trúc AnkiAI ImageAddon v6.0
 
-## Tổng quan cấu trúc
+## Tổng quan
+
+AnkiAI ImageAddon dùng pipeline **Accuracy-First**: phân loại NLP cục bộ → search + CLIP rerank → Vision QC đồng bộ, trong ngân sách 3–4 s/thẻ. Cache SQLite 4 tầng, retry queue nền, telemetry cục bộ.
+
+```
+Từ vựng + Câu ví dụ
+        │
+        ▼
+  Phân loại 14 nhóm A–N (NLP cục bộ, <1 ms)
+        │
+   ┌────┴────────────┬──────────────┬──────────┐
+   ▼                 ▼              ▼          ▼
+ Nhóm dễ          Nhóm AI       Nhóm K/N    Nhóm M
+ (0 AI call)   (search+CLIP+QC) (SVG nội bộ) (bỏ qua)
+   │                 │              │          │
+   │          ┌──────┴──────┐      │          │
+   │          ▼             ▼      │          │
+   │     Search top-12   CLIP     │          │
+   │     + fallback    rerank     │          │
+   │          │             │      │          │
+   │          └──────┬──────┘      │          │
+   │                 ▼              │          │
+   │          Vision QC ≤2 vòng    │          │
+   │          (1 ảnh/vòng)         │          │
+   │                 │              │          │
+   └────────┬────────┴──────────────┘          │
+            ▼                                  │
+     L1 cache → url → download → compress     │
+            │                                  │
+            ▼                                  ▼
+     Gắn ảnh vào thẻ ✓                   Bỏ qua thẻ
+```
+
+## Cấu trúc thư mục
 
 ```
 AnkiAI_ImageAddon/
-├── __init__.py              # Main entry point - orchestrate toàn bộ
-├── manifest.json            # Metadata của add-on
+├── __init__.py                  # Entry point + AddImageTask + Browser menu hooks
+├── modules/
+│   ├── config.py                # ConfigManager (v9, auto-upgrader, 35+ keys)
+│   ├── pipeline.py              # Orchestrator Accuracy-First + budget governor
+│   ├── cache.py                 # CacheManager: SQLite 4-tier + retry queue + community
+│   ├── bg_handler.py            # BackgroundProcessor + RetryQueue + IdlePrefetch
+│   ├── telemetry.py             # TelemetryCollector + suggest_adjustments + feedback→L4
+│   ├── quota.py                 # QuotaManager: reserve 20%, 5 degrade levels
+│   ├── reranker.py              # CLIP gate + bias theo nhóm (boost/penalty keywords)
+│   ├── image_handler.py         # Tải, nén in-memory (≤800px q80 ≤120KB), lưu Anki media
+│   ├── ui.py                    # ConfigDialog + FeedbackWidget + QuotaDisplay + VerificationBadge
+│   ├── ui_theme.py              # Theme tokens + stylesheet
+│   ├── ui_widgets.py            # Widget primitives
+│   ├── note_presets.py          # Note type preset management
+│   ├── features.py              # Feature flags
+│   ├── logging_setup.py         # Rotating 3×1 MB + redact API key
+│   ├── model_downloader.py      # Tải model: sha256 + resume + progress
+│   ├── sandbox.py               # CLI sandbox (không cần Anki)
+│   ├── debug_log.py             # Debug logging helpers
+│   ├── http_session_manager.py  # HTTP session pooling
+│   ├── api_handler.py           # Legacy AI handler (guard)
+│   ├── ai_providers.py          # AI provider registry (legacy)
+│   ├── imagen_provider.py       # Imagen provider (legacy)
+│   ├── image_providers.py       # Image provider routing (legacy)
+│   ├── provider_registry.py     # Provider registry
+│   │
+│   ├── classification/          # NLP cục bộ — KHÔNG import Qt/Anki
+│   │   ├── taxonomy.py          # Phân loại 14 nhóm A–N
+│   │   ├── visual_type.py       # Lớp visual_type (7 loại)
+│   │   ├── clip_scorer.py       # CLIP 3-tier: ONNX → heuristic → none
+│   │   ├── resources.py         # Lazy-load WordNet/spaCy
+│   │   └── data/                # 7 bộ dataset tĩnh
+│   │       ├── concreteness.json
+│   │       ├── idioms.json
+│   │       ├── gazetteer.json
+│   │       ├── domain_lexicon.json
+│   │       ├── function_words.json
+│   │       ├── spatial_prepositions.json
+│   │       └── stative_verbs.json
+│   │
+│   ├── llm/                     # LLM clients
+│   │   ├── groq_client.py       # Groq: batch auto TPM, pacing, fallback, probe
+│   │   ├── gemini_client.py     # Gemini: text backup + vision QC, probe vision model
+│   │   └── prompts.py           # P1 (query gen) / P2 (expand) / P3 (verify)
+│   │
+│   └── providers/               # Image providers (legacy routing)
+│       ├── base.py              # BaseProvider interface
+│       ├── general.py           # Pexels, Unsplash, Pixabay, DuckDuckGo, Yandex
+│       ├── scientific.py        # PubChem, ChEMBL, PhyloPic, RCSB
+│       ├── wikimedia.py         # Wikimedia Commons, NASA, Europeana, Met, LoC
+│       ├── animated.py          # KLIPY, GIPHY, Pixabay GIF
+│       ├── entertainment.py     # IconScout
+│       └── legacy_free.py       # Legacy free providers
 │
-└── modules/                 # Các component tách biệt
-    ├── __init__.py
-    ├── config.py            # Quản lý cầu hình
-    ├── ui.py                # Giao diện & Browser menu (Giai đoạn 1)
-    ├── api_handler.py       # Tích hợp AI API (Giai đoạn 2)
-    ├── image_handler.py     # Tải & lưu ảnh (Giai đoạn 3)
-    └── bg_handler.py        # Background processing (Giai đoạn 4)
+├── image_providers/             # Contract-based providers (GĐ1+)
+│   ├── base_provider.py         # Candidate dataclass (frozen) + BaseProvider interface
+│   ├── health.py                # HealthBoard: EMA latency/success, fallback động
+│   ├── svg_engine.py            # ~26 SVG template (K: giới từ, N: công thức)
+│   ├── local_svg_provider.py    # Data-URI SVG, 0 network, score=1.0
+│   ├── static/                  # Static image providers (contract)
+│   ├── animated/                # Animated providers (contract)
+│   ├── scientific/              # Scientific providers (contract)
+│   └── wikimedia/               # Wikimedia providers (contract)
+│
+└── user_files/                  # Runtime data (gitignored)
+    ├── cache.sqlite             # SQLite 4-tier cache (WAL)
+    ├── models/                  # CLIP/WordNet/spaCy models
+    ├── logs/                    # Rotating logs (3×1 MB)
+    ├── eval_set/                # Eval set 153 từ gán nhãn
+    ├── concept_metaphor_map.json  # Proxy families
+    └── .gitkeep
 ```
 
-## Flow Diagram
+## Mô tả Module
 
-```
-Người dùng Anki
-     ↓
-[Open Browser & Select Cards]
-     ↓
-[Right-click → "AnkiAI: Tự động thêm ảnh"]
-     ↓
-ui.py: on_browser_menu_add_images()
-     ├─→ Check API key
-     ├─→ Show field selection dialog
-     └─→ Initialize AIImageProvider & ImageHandler
-           ↓
-bg_handler.py: BackgroundProcessor
-     └─→ For each note_id in selected:
-           ├─→ Get note from database
-           ├─→ Extract vocabulary & definition
-           ├─→ Process via AddImageTask
-           │   ├─→ Call api_handler.get_image_url()
-           │   │   ├─→ Option A: OpenAI.generate_image() (DALL-E)
-           │   │   └─→ Option B: ChatGPT + Unsplash.search_image()
-           │   ├─→ Call image_handler.download_image()
-           │   ├─→ Call image_handler.save_image_to_anki()
-           │   │   └─→ mw.col.media.writeData() [CRITICAL]
-           │   └─→ Call image_handler.insert_image_to_note()
-           ├─→ note.flush()
-           └─→ Show progress bar
-     ↓
-[Show Results Dialog]
-```
+### Pipeline (`modules/pipeline.py`)
 
-## Mô tả từng Module
+Orchestrator chính — điều phối toàn bộ flow từ phân loại đến gắn ảnh.
 
-### 1️⃣ config.py - Quản lý cấu hình
+**Quy trình:**
+1. Phân loại NLP → nhóm + visual_type
+2. Nhóm dễ (A/B/C/H/K/N/M) → search trực tiếp hoặc SVG nội bộ
+3. Nhóm AI → Groq tạo query → search top-12–15 → CLIP rerank → Vision QC ≤2 vòng
+4. Budget governor kẹp deadline từng bước theo `remaining`
+5. L1 cache → url → download → nén → gắn vào thẻ
 
-**Trách nhiệm**:
-- Lấy/lưu config từ Anki
-- Validate API keys
-- Cung cấp default values
+**Budget governor:**
+- `card_latency_budget_ms` = 3500 (mặc định)
+- Mỗi bước nhận `remaining_ms`, tự bỏ qua nếu không đủ
+- Vòng 2 QC: chỉ mở khi `round2_min_remaining_ms` ≥ 2050
 
-**Key Classes**:
-- `ConfigManager`: Singleton quản lý toàn bộ config
+**Nhóm D mở rộng AI:** chỉ khi candidates < `min_candidates_before_ai_expand` (mặc định 3)
 
-**Default Config**:
-```python
-{
-    "openai_api_key": "",
-    "unsplash_api_key": "",
-    "image_generation_mode": "dall-e",  # hoặc "search"
-    "vocabulary_field": "Mặt trước",
-    "definition_field": "Định nghĩa",
-    "image_field": "Ảnh",
-    "image_download_timeout": 30,
-    "max_concurrent_requests": 3,
-}
-```
-
-**Public API**:
-```python
-config_manager.get(key, default)
-config_manager.set(key, value)
-config_manager.validate_api_keys()
-```
+**Strict mode:** bỏ qua ảnh chưa QC → chỉ trả ảnh đã verify
 
 ---
 
-### 2️⃣ ui.py - User Interface (Giai đoạn 1)
+### CacheManager (`modules/cache.py`)
 
-**Trách nhiệm**:
-- Tạo Browser context menu
-- Lấy danh sách thẻ được chọn
-- Dialog cho người dùng chọn field
-- Dialog cấu hình API
+SQLite 4-tier cache, WAL mode, indexes trên `word` và `query`.
 
-**Key Classes**:
-- `BrowserMenuManager`: Hook vào Browser, show/hide menu
-- `FieldSelectionDialog`: Dialog chọn vocabulary/definition/image field
-- `ConfigDialog`: Dialog nhập API key
+| Tầng | Bảng | Khóa chính | Nội dung | TTL |
+|------|------|-----------|----------|-----|
+| L1 | `l1_lookup` | word + sense_id | url, clip_score, resolved_by, qc_verified, source_provider, attribution | Vĩnh viễn |
+| L2 | `l2_lookup` | word + sense_id | query, en_query, group, visual_type | Vĩnh viễn |
+| L3 | `l3_candidates` | query | Top candidates (JSON), provider | 30 ngày |
+| L4 | `l4_negative` | word + query | "bad" flag | Vĩnh viễn |
 
-**Public API**:
-```python
-browser_menu_manager.setup_browser_menu(browser, callback)
-browser_menu_manager.get_selected_note_ids(browser)  # → [1, 2, 3]
-```
+**Bảng phụ:**
+- `retry_queue`: hàng đợi thử lại (exponential backoff 30→60→120→240s, max 3 retries)
+- `telemetry`: bản ghi telemetry (word, group, latency, clip_score, provider, qc_pass)
+- `processed_notes`: note_id đã xử lý (tránh lặp)
 
-**Event Flow**:
-1. User right-click in Browser
-2. Menu hoàn → "AnkiAI: Tự động thêm ảnh"
-3. `on_browser_menu_add_images()` được gọi
-4. Lấy selected note IDs
-5. Show Dialog (nếu cần)
+**Community cache methods:**
+- `community_export()` → pack JSON ẩn danh (version 1)
+- `community_export_to_file(path)` → ghi pack ra file
+- `community_import(pack)` → nhập pack, local wins
+- `community_import_from_file(path)` → đọc + nhập từ file
 
 ---
 
-### 3️⃣ api_handler.py - AI Integration (Giai đoạn 2)
+### Background Processing (`modules/bg_handler.py`)
 
-**Trách nhiệm**:
-- Gọi OpenAI API (ChatGPT + DALL-E)
-- Gọi Unsplash/Pixabay API
-- Chọn provider phù hợp
+Dùng **Anki QueryOp** + **ThreadPoolExecutor** (KHÔNG asyncio, KHÔNG threading.Thread thô).
 
-**Key Classes**:
-- `OpenAIHandler`: ChatGPT & DALL-E
-  - `generate_search_keyword()`: ChatGPT → từ khóa
-  - `generate_image()`: DALL-E → ảnh
-  
-- `UnsplashHandler`: Tìm ảnh từ Unsplash
-  - `search_image()`: keyword → URL
-  
-- `PixabayHandler`: Tìm ảnh từ Pixabay
-  - `search_image()`: keyword → URL
+- `BackgroundProcessor`: điều phối batch processing với progress bar
+- `RetryQueue`: thin wrapper quanh CacheManager retry methods
+- `IdlePrefetch`: QTimer 300ms phát hiện idle → QueryOp xử lý các thẻ chưa có ảnh
 
-- `AIImageProvider`: Wrapper chọn mode
-  - `get_image_url()`: Gọi provider thích hợp
-
-**Example Usage**:
-```python
-# Mode A: DALL-E
-provider = AIImageProvider(openai_key="sk-...", mode="dall-e")
-url = provider.get_image_url("Apple", "A company")
-
-# Mode B: Search
-provider = AIImageProvider(
-    openai_key="sk-...",
-    mode="search",
-    unsplash_key="..."
-)
-url = provider.get_image_url("Apple", "A company")
-```
-
-**Error Handling**:
-- Timeout: Retry 3 lần
-- Invalid response: Throw APIError
-- Rate limiting: Wait & retry
+**Thread safety:** `_GLOBAL_DB_LOCK` (RLock) bảo vệ `col.update_note()` / `col.save()`. Callback `on_done` chạy trên main thread.
 
 ---
 
-### 4️⃣ image_handler.py - Image Processing (Giai đoạn 3)
+### QuotaManager (`modules/quota.py`)
 
-**Trách nhiệm**:
-- Tải ảnh từ URL
-- Lưu vào thư mục média của Anki
-- Chèn HTML vào note
-- Detect image format
+Quản lý ngân sách API theo model, 5 degrade levels:
 
-**Key Classes**:
-- `ImageHandler`:
-  - `download_image()`: URL → bytes
-  - `get_image_filename()`: Tạo tên file duy nhất
-  - `_detect_image_format()`: Magic bytes → extension
-  - `save_image_to_anki()`: bytes → mw.col.media.writeData()
-  - `insert_image_to_note()`: HTML → note field
-  - `process_image()`: Full pipeline
+| Level | Điều kiện | Hành vi |
+|-------|-----------|---------|
+| 0 — Full | Tất cả đủ | AI + vision QC bình thường |
+| 1 — Workhorse caution | Workhorse near limit | Ưu tiên reserve model |
+| 2 — Reserve only | Workhorse exhausted | Dùng reserve model |
+| 3 — Text only | Vision exhausted | Bỏ QC, badge ⚠ unverified |
+| 4 — No AI | Tất cả exhausted | Chỉ search tĩnh, không AI |
 
-**CRITICAL**: `mw.col.media.writeData()`
-
-Anki sẽ:
-- Lưu file vào thư mục media
-- Tự động đồng bộ lên AnkiWeb
-- Track dependencies
-
-**Example Usage**:
-```python
-image_handler = ImageHandler(mw)
-
-# 1. Tải ảnh
-image_data = image_handler.download_image("https://...")
-
-# 2. Lưu vào Anki
-filename = image_handler.save_image_to_anki(image_data, "apple.jpg")
-
-# 3. Chèn vào note
-image_handler.insert_image_to_note(note, filename, "Ảnh")
-note.flush()
-```
-
-**Supported Formats**: .jpg, .png, .gif, .webp
+Reserve 20% quota cho interactive (người dùng tương tác trực tiếp).
 
 ---
 
-### 5️⃣ bg_handler.py - Background Processing (Giai đoạn 4)
+### Telemetry (`modules/telemetry.py`)
 
-**Trách nhiệm**:
-- Xử lý hàng ngàn thẻ mà không freeze UI
-- Hiển thị thanh tiến trình
-- Handle cancellation
+TelemetryCollector — **chỉ cục bộ**, không gửi ra ngoài.
 
-**Key Classes**:
-- `BackgroundProcessor`:
-  - `process_cards_in_background()`: Chạy ngầm
-  - `cancel()`: Dừng xử lý
-  
-- `ProcessingTask`: Base class cho công việc
-  - `process_note()`: Xử lý 1 note (override)
-  - `get_summary()`: Tóm tắt kết quả
-
-- `ProgressDialog`: Hiển thị tiến trình (Qt)
-
-**Sử dụng Anki's QueryOp**:
-```python
-op = QueryOp(mw, background_work, on_done)
-op.with_progress("Title").run_in_background()
-```
-
-Ưu điểm:
-- Non-blocking UI
-- Built-in progress bar
-- Proper exception handling
-
-**Example Usage**:
-```python
-processor = BackgroundProcessor()
-
-def process_note(note):
-    # Do something with note
-    return success, message
-
-processor.process_cards_in_background(
-    note_ids=[1, 2, 3],
-    process_func=process_note,
-    on_progress=lambda cur, tot, msg: print(f"{cur}/{tot}"),
-    on_success=lambda res: print("Done!"),
-    on_error=lambda err: print(f"Error: {err}")
-)
-```
+- `record()`: ghi mỗi lần xử lý (word, group, latency, clip_score, provider, qc_pass)
+- `feedback(word, url, vote)`: 👍 ghi lại, 👎 thêm vào L4 negative cache
+- `recent_entries(word)`: xem bản ghi gần đây
+- `suggest_adjustments()`: phân tích và đề xuất tinh chỉnh:
+  - QC fail rate cao → tăng CLIP threshold
+  - CLIP score thấp → giảm threshold
+  - Latency cao → xem lại provider
+  - Cache hit rate thấp → bật idle prefetch
 
 ---
 
-### 🎯 __init__.py - Main Orchestrator
+### Classification (`modules/classification/`)
 
-**Trách nhiệm**:
-- Setup add-on khi Anki khởi động
-- Khởi tạo tất cả components
-- Định nghĩa AddImageTask
-- Hook vào browser menus
+**Pure Python — KHÔNG import Qt hay Anki.**
 
-**Key Classes**:
-- `AddImageTask(ProcessingTask)`: Công việc chính
-  - Lấy vocabulary/definition
-  - Gọi AI
-  - Tải ảnh
-  - Chèn vào note
+**taxonomy.py:**
+- 14 nhóm A–N dựa trên 7 bộ data tĩnh + spaCy POS + WordNet + Brysbaert concreteness
+- Eval accuracy: 100% (153/153 từ)
 
-**Hooks**:
-- `profile_did_open`: Hook Anki startup
-- `browser_menus_did_init`: Hook Browser menu
+**visual_type.py:**
+- 7 visual type: photo, diagram_or_map, metaphor_photo, illustration, animated_gif, scientific_image, local_svg, none
+- Proxy family mapping cho nhóm E (từ trừu tượng → từ cụ thể)
 
-**Global Instances**:
-```python
-config_manager = get_config_manager()
-browser_menu_manager = BrowserMenuManager()
-image_handler = ImageHandler(mw)
-bg_processor = BackgroundProcessor()
-```
+**clip_scorer.py:**
+- 3 tier: ONNX (CLIP model) → heuristic (Brysbaert + boost/penalty keywords) → none
+- Batch-encode, encode text 1 lần, luôn nạp `en_query`
+- Singleton pattern
+
+---
+
+### Reranker (`modules/reranker.py`)
+
+Kết hợp CLIP score + bias theo nhóm:
+
+- **Boost keywords** (nhóm F): map, arrow, diagram, chess, plan, strategy
+- **Penalty keywords** (nhóm F): coach, stadium, whistle, shouting, suit, meeting
+- Combined score = CLIP score + bias
+- Candidate frozen → dùng `dataclasses.replace()` tạo bản mới
+
+---
+
+### LLM Clients (`modules/llm/`)
+
+**groq_client.py:**
+- Batch auto TPM, pacing giữa requests
+- Fallback khi model không available
+- Probe đầu phiên kiểm tra connectivity
+
+**gemini_client.py:**
+- Text generation (backup khi Groq down)
+- Vision QC: gửi ảnh + context, hỏi "Does this image match the word?"
+- Probe đầu phiên phủ cả `gemini_vision_model`
+
+**prompts.py:**
+- P1: tạo search query từ word + definition
+- P2: mở rộng query khi candidates ít
+- P3: verify image match (Vision QC)
+
+---
+
+### SVG Engine (`image_providers/svg_engine.py`)
+
+Template SVG nội bộ, 0 network request:
+
+- **Nhóm K** (22 template): above, below, beside, between, inside, through, towards, around, behind, in front of, opposite, against, along, across, onto, off, past, upon, beneath, within, without, beyond
+- **Nhóm N** (4 sub-type): chemical formula (H₂O, CO₂), measurement unit (37°C), math expression (2+2=4), generic fallback
+
+Output: SVG string → `local_svg_provider.py` bọc thành data-URI `Candidate`.
+
+---
+
+### HealthBoard (`image_providers/health.py`)
+
+Dynamic provider ordering dựa trên EMA latency/success:
+
+- Mỗi provider: EMA latency, success rate, overall score
+- `order_providers()` → sắp xếp: fast + reliable lên đầu, down xuống cuối
+- Thread-safe (RLock)
+- Singleton pattern
+
+---
+
+### Image Handler (`modules/image_handler.py`)
+
+- Tải ảnh in-memory (BytesIO), KHÔNG tạo file tạm
+- Nén TRƯỚC `col.media.writeData()`:
+  - Long-edge resize ≤ 800px
+  - JPEG progressive quality reduction (q80 → q70 → ... ≤ 120KB)
+  - Bỏ qua nén cho animated (GIF, animated WebP, SVG)
+- Rollback orphan media qua `col.media.trash_files`
+- `url_only_mode`: chỉ lưu URL, không tải ảnh (kèm cảnh báo)
+- Attribution CC ghi vào field riêng
+
+---
+
+### Config (`modules/config.py`)
+
+`ConfigManager` singleton, version 9:
+- `CURRENT_CONFIG_VERSION = 9`
+- `_upgrade_config()`: tự động nâng cấp từ version cũ
+- `_migrate_to_v9()`: migrate keys cũ → mới
+- Key lạ → ignore + warn (không crash)
+- 35+ config keys (API keys, pipeline, cache, telemetry, UI)
 
 ---
 
 ## Design Patterns
 
-### 1. Singleton Pattern
-```python
-# config.py
-config_manager = None
+| Pattern | Ứng dụng |
+|---------|----------|
+| **Singleton** | ConfigManager, CacheManager, TelemetryCollector, ClipScorer, HealthBoard |
+| **Strategy** | CLIP tier (ONNX/heuristic/none), visual_type routing, provider selection |
+| **Frozen dataclass** | Candidate, L1Entry, L2Entry, CardResult — immutable |
+| **Budget governor** | Pipeline: deadline per-step, skip nếu insufficient remaining |
+| **Exponential backoff** | RetryQueue: 30→60→120→240s, max 3 retries |
+| **Observer** | QTimer idle detection → IdlePrefetch, HealthBoard EMA updates |
+| **Callback** | FeedbackWidget on_vote, BackgroundProcessor on_progress/on_done |
+| **WAL** | SQLite write-ahead logging cho crash resilience |
 
-def get_config_manager():
-    global config_manager
-    if config_manager is None:
-        config_manager = ConfigManager()
-    return config_manager
-```
-
-### 2. Strategy Pattern (cho AI provider)
-```python
-# api_handler.py
-AIImageProvider.mode = "dall-e" or "search"
-# Tự động chọn strategy phù hợp
-```
-
-### 3. Task Pattern (cho background)
-```python
-# bg_handler.py
-class ProcessingTask:
-    def process_note(self, note):
-        # Override trong subclass
-        pass
-```
-
-### 4. Callback Pattern
-```python
-# __init__.py
-processor.process_cards_in_background(
-    ...,
-    on_progress=callback,
-    on_success=callback,
-    on_error=callback
-)
-```
-
----
-
-## Sequence Diagram
+## Threading Model
 
 ```
-Browser User
+Main Thread (Qt)
     │
-    ├─→ [1. Select cards]
+    ├── UI events, Anki operations
+    ├── QTimer (300ms) → IdlePrefetch trigger
     │
-    ├─→ [2. Right-click]
-    │       │
-    │       └─→ ui.show_menu()
-    │
-    ├─→ [3. Click "AnkiAI"]
-    │       │
-    │       └─→ on_browser_menu_add_images()
-    │           ├─→ Get selected note IDs
-    │           ├─→ Check & validate API key
-    │           ├─→ Show FieldSelectionDialog
-    │           ├─→ Show confirm dialog
-    │           └─→ Start background process
-    │
-    └─→ [4. Wait for progress]
-            (other Anki operations can continue)
-            │
-            └─→ bg_handler.QueryOp
-                ├─→ For each note:
-                │   ├─→ AddImageTask.process_note()
-                │   │   ├─→ Get vocabulary/definition
-                │   │   ├─→ api_handler.get_image_url()
-                │   │   ├─→ image_handler.download_image()
-                │   │   ├─→ image_handler.save_image_to_anki()
-                │   │   └─→ image_handler.insert_image_to_note()
-                │   ├─→ note.flush()
-                │   └─→ Call on_progress callback
-                │
-                └─→ Call on_success/on_error callback
-                    └─→ Show results dialog
+    └── QueryOp → ThreadPoolExecutor (max 5 workers)
+                     │
+                     ├── Search providers (I/O bound)
+                     ├── CLIP scoring (CPU bound)
+                     ├── Image download + compress
+                     └── LLM calls (I/O bound)
+                          │
+                          └── on_done callback → Main Thread
 ```
 
----
+**Quy tắc:**
+- KHÔNG dùng `asyncio` — `ThreadPoolExecutor` + futures
+- KHÔNG dùng `threading.Thread` thô — `QueryOp` cho Anki background
+- KHÔNG touch `mw` từ worker thread
+- `_GLOBAL_DB_LOCK` (RLock) bảo vệ database writes
 
-## Error Handling Strategy
+## Error Handling
 
-### Levels:
+| Layer | Chiến lược |
+|-------|-----------|
+| **LLM** | Retry 3×, fallback Groq↔Gemini, probe đầu phiên |
+| **Search** | Fallback providers (HealthBoard ordering), L3 cache |
+| **Image** | Progressive quality reduction, format detection, skip animated compression |
+| **Pipeline** | Budget governor skip, degrade chain (quota), L4 negative cache |
+| **Cache** | WAL crash resilience, migration tombstone, idempotent import |
+| **Background** | RetryQueue exponential backoff, exhausted parked, purge |
 
-1. **API Layer** (api_handler.py)
-   - Try 3 times nếu timeout
-   - Throw APIError nếu fail
+## Security
 
-2. **Image Layer** (image_handler.py)
-   - Try 3 times tải ảnh
-   - Detect format dynamically
-   - Throw ImageError nếu fail
+- API keys: lưu local-only, KHÔNG gửi ra ngoài, KHÔNG log
+- `_RedactFilter` trong logging: thay API key bằng `***`
+- Community cache: ẩn danh hoàn toàn (không sentence, không user data)
+- Image: tải về local, sync qua AnkiWeb mechanism chính thức
+- `.gitignore`: loại trừ `*.sqlite`, `models/`, `logs/`, `*.json` (trừ `.gitkeep`)
 
-3. **Task Layer** (__init__.py)
-   - Catch APIError & ImageError
-   - Return (success, message)
-   - Log mỗi error
+## Testing
 
-4. **Background Layer** (bg_handler.py)
-   - Catch Task exceptions
-   - Add to errors list
-   - Continue processing
+270 tests trong `tests/`:
 
-5. **UI Layer** (ui.py)
-   - Show summary: X failed, Y succeeded
-   - Show detailed errors
-
----
-
-## Performance Considerations
-
-### Optimization:
-
-1. **Batch Processing**
-   - Xử lý 100-200 thẻ / lần
-   - Không hơn → RAM overflow
-
-2. **Timeout Settings**
-   - Download: 30s
-   - API calls: 10s
-   - Retry: 3x
-
-3. **Concurrent Requests**
-   - Default: 3 parallel
-   - Tăng → rate limit risk
-   - Giảm → chậm hơn
-
-4. **Cache**
-   - Có thể cache từ khóa
-   - Nếu vocabulary = "Apple" từng tìm → reuse
-
----
-
-## Testing Strategy
-
-### Unit tests:
-```python
-# test_config.py
-def test_get_config()
-def test_set_config()
-def test_validate_api_keys()
-
-# test_api_handler.py
-def test_openai_search_keyword()
-def test_openai_generate_image()
-def test_unsplash_search()
-
-# test_image_handler.py
-def test_download_image()
-def test_detect_format()
-def test_save_to_anki()
-
-# test_ui.py
-def test_get_selected_notes()
-def test_field_selection_dialog()
-```
-
-### Integration tests:
-```python
-# test_integration.py
-def test_full_workflow():
-    # Select cards → API → Download → Save
-    pass
-```
+| File | Tests | Nội dung |
+|------|-------|----------|
+| `test_taxonomy.py` | 6 | Phân loại 14 nhóm, eval accuracy |
+| `test_visual_type.py` | 6 | Visual type mapping, hồi quy tactics |
+| `test_clip_scorer.py` | 19 | CLIP 3-tier, heuristic, batch, ONNX fallback |
+| `test_reranker.py` | 12 | CLIP gate, bias, regression tactics |
+| `test_svg_engine.py` | 47 | Template K/N, data-URI, provider interface |
+| `test_pipeline_budget.py` | 16 | Budget governor, QC round 2 gate, degrade |
+| `test_quota.py` | 12 | Reserve, degrade chain, snapshot |
+| `test_cache.py` | 24 | L1–L4, WAL, crash resilience, stats |
+| `test_cache_migration.py` | 9 | JSON→SQLite migration |
+| `test_retry_queue.py` | 20 | Enqueue/dequeue, backoff, wrapper |
+| `test_telemetry.py` | 14 | Record, feedback→L4, suggest_adjustments |
+| `test_community_cache.py` | 15 | Export, import, local-wins, round-trip |
+| `test_health_board.py` | 12 | EMA, ordering, thread-safe |
+| `test_latency.py` | 1 | Classification benchmark |
+| `test_model_downloader.py` | 3 | SHA256, resume, checksum mismatch |
+| `providers/test_providers_contract.py` | 12 | Candidate, BaseProvider, HTTP mock |
+| `providers/test_animated.py` | 9 | KLIPY, GIPHY, Pixabay, IconScout |
+| `core/*` | 17 | AddImageTask, delay, image handler, presets |
+| `integration/*` | 9 | Animated search, provider stats |
+| `test_ui_redesign_verification.py` | 7 | Theme, widgets, dialogs |
 
 ---
 
-## Security Considerations
-
-1. **API Keys**
-   - Stored locally, never transmitted to 3rd party
-   - Hidden in config dialog (placeholder)
-   - Never logged
-
-2. **Images**
-   - Downloaded to local machine
-   - Synced through Anki's official mechanism
-   - No metadata leakage
-
-3. **Data Privacy**
-   - Vocabulary sent to OpenAI (unavoidable)
-   - Anki data not shared elsewhere
-   - GDPR compliant
-
----
-
-## Future Improvements
-
-1. **Cache search keywords** để tránh re-call AI
-2. **Support video ảnh** (animated)
-3. **Batch API calls** thay vì individual
-4. **Custom prompts** cho DALL-E
-5. **Image templates** (add borders, text, etc.)
-6. **Auto-retry** logic tuyên chỉnh
-7. **Statistics dashboard** (cost, success rate)
-8. **Undo last batch** functionality
-
----
-
-**Architecture Version**: 1.0
-**Last Updated**: 2024
+**Architecture Version**: 6.0  
+**Last Updated**: August 2026
