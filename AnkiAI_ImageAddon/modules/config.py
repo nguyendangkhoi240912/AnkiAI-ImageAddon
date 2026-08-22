@@ -204,6 +204,7 @@ class ConfigManager:
         # GĐ4: Community cache [MS §12]
         "community_cache_enabled": False,
         "community_cache_url": "",
+
     }
     
     # Tên thư mục addon (dùng để Anki đọc/ghi config đúng)

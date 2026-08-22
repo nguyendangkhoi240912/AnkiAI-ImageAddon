@@ -259,7 +259,6 @@ class ImageHandler:
             quality = getattr(self, "_opt_quality", 80)
         # MS §13 target: ≤120KB
         max_size_kb = getattr(self, "_opt_max_kb", 120)
-
         try:
             img = Image.open(BytesIO(image_data))
 
@@ -295,7 +294,6 @@ class ImageHandler:
                     optimized_data = output.getvalue()
                     if len(optimized_data) / 1024 <= max_size_kb:
                         break
-
             original_kb = len(image_data) / 1024
             optimized_kb = len(optimized_data) / 1024
             ratio = (1 - optimized_kb / original_kb) * 100 if original_kb > 0 else 0
