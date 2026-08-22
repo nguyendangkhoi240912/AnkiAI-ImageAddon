@@ -318,3 +318,225 @@ class ProcessingTask:
             "results": self.results,
             "errors": self.errors
         }
+
+
+# ---------------------------------------------------------------------------
+# Retry Queue — GĐ5, G5.3                                     [MS §14]
+# ---------------------------------------------------------------------------
+
+class RetryQueue:
+    """Persistent retry queue backed by ``cache.sqlite``.
+
+    When a card fails (provider error, network timeout, QC exhausted),
+    the ``BackgroundProcessor`` enqueues it here.  A periodic timer or
+    the next batch start drains eligible items and retries them.
+
+    Exponential backoff: 30 s → 60 s → 120 s → 240 s → … (max ~32 min).
+    After *max_retries* (default 3) the item is parked and later purged.
+
+    Usage::
+
+        rq = RetryQueue(cache_manager)
+        rq.enqueue(note_id=42, word="tactics", error_msg="network timeout")
+        ...
+        for item in rq.due_items():
+            ...  # retry
+            rq.mark_success(item["id"])
+    """
+
+    def __init__(self, cache_manager):
+        self._cm = cache_manager
+
+    # -- public API -------------------------------------------------------
+
+    def enqueue(self, note_id: int, word: str = "", sentence: str = "",
+                error_msg: str = "", failed_step: str = "",
+                max_retries: int = 3) -> None:
+        """Add a failed card to the retry queue."""
+        self._cm.retry_enqueue(
+            note_id=note_id, word=word, sentence=sentence,
+            error_msg=error_msg, failed_step=failed_step,
+            max_retries=max_retries,
+        )
+
+    def due_items(self, limit: int = 50) -> list:
+        """Return items ready for retry (next_retry_at <= now)."""
+        return self._cm.retry_dequeue(limit=limit)
+
+    def mark_success(self, item_id: int) -> None:
+        """Remove a successfully retried item."""
+        self._cm.retry_remove(item_id)
+
+    def mark_failed(self, item_id: int, error_msg: str = "") -> None:
+        """Record a retry attempt; schedule next with backoff."""
+        self._cm.retry_mark_attempt(item_id, error_msg=error_msg)
+
+    def pending_count(self) -> int:
+        """Number of items still eligible for retry."""
+        return self._cm.retry_count()
+
+    def purge_exhausted(self) -> int:
+        """Remove items that exceeded max_retries. Returns count purged."""
+        return self._cm.retry_purge_exhausted()
+
+    def clear(self) -> None:
+        """Remove all items (e.g. user resets)."""
+        self._cm.retry_clear()
+
+    def __repr__(self) -> str:
+        return f"<RetryQueue pending={self.pending_count()}>"
+
+
+# ---------------------------------------------------------------------------
+# Idle Prefetch — GĐ5, G5.3                                   [MS §9.6]
+# ---------------------------------------------------------------------------
+
+class IdlePrefetch:
+    """Pre-process easy-group cards during user idle time.
+
+    After 300 ms of inactivity in the Browser, runs a lightweight
+    background pass for cards in easy groups (A, C, I, K, M, N) that
+    are not yet in cache L1.  Results are written to cache so the next
+    batch or single-card request is a near-instant cache hit.
+
+    Uses ``QTimer`` for idle detection and ``QueryOp`` for background
+    execution — no raw ``threading.Thread``.
+
+    Config keys (§21):
+        idle_prefetch_enabled   (bool, default True)
+        idle_prefetch_batch     (int,  default 20)
+
+    Usage (from ``__init__.py``)::
+
+        prefetch = IdlePrefetch(mw, cache_manager, pipeline)
+        prefetch.start()
+    """
+
+    _IDLE_DELAY_MS = 300
+
+    def __init__(self, main_window, cache_manager, pipeline=None):
+        from aqt.qt import QTimer
+        self._mw = main_window
+        self._cm = cache_manager
+        self._pipeline = pipeline
+        self._timer = QTimer()
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._on_idle)
+        self._running = False
+        self._active = False  # True while a prefetch op is in-flight
+
+    def start(self) -> None:
+        """Begin idle monitoring."""
+        self._running = True
+        self._schedule_next()
+
+    def stop(self) -> None:
+        """Stop idle monitoring."""
+        self._running = False
+        self._timer.stop()
+
+    def notify_activity(self) -> None:
+        """Call this when user activity is detected (resets idle timer)."""
+        if self._running:
+            self._schedule_next()
+
+    # -- internal ---------------------------------------------------------
+
+    def _schedule_next(self) -> None:
+        if self._running and not self._active:
+            self._timer.start(self._IDLE_DELAY_MS)
+
+    def _on_idle(self) -> None:
+        """Timer fired — start a prefetch batch if enabled."""
+        if self._active or not self._running:
+            return
+        try:
+            cfg = self._mw.col.conf  # Anki collection config
+        except Exception:
+            return
+
+        # Check config toggle (read from addon config, not col.conf)
+        try:
+            from .config import get_config_manager
+            addon_cfg = get_config_manager()
+            if not addon_cfg.get("idle_prefetch_enabled", True):
+                return
+            batch_size = addon_cfg.get("idle_prefetch_batch", 20)
+        except Exception:
+            return
+
+        if self._pipeline is None:
+            return
+
+        self._active = True
+        self._run_prefetch_batch(batch_size)
+
+    def _run_prefetch_batch(self, batch_size: int) -> None:
+        """Execute a lightweight prefetch batch via QueryOp."""
+        pipeline = self._pipeline
+        cm = self._cm
+
+        def _work(col):
+            """Background: find easy-group words not yet in L1 and process them."""
+            processed = 0
+            try:
+                # Collect note IDs from the current browser selection
+                browser = self._mw.browser
+                if browser is None:
+                    return processed
+                note_ids = browser.selected_notes()
+                if not note_ids:
+                    return processed
+
+                for nid in note_ids[:batch_size]:
+                    try:
+                        note = col.get_note(nid)
+                    except Exception:
+                        continue
+
+                    # Extract word from the note
+                    keys = list(note.keys())
+                    if not keys:
+                        continue
+                    import re as _re
+                    word = _re.sub(r"<[^>]+>", "", note[keys[0]]).strip()
+                    if not word:
+                        continue
+
+                    # Skip if already cached in L1
+                    if cm.l1_lookup(word) is not None:
+                        continue
+
+                    # Run pipeline (easy-group path only)
+                    try:
+                        result = pipeline.process_card(
+                            word=word,
+                            sentence="",
+                            budget_ms=1500,  # shorter budget for prefetch
+                        )
+                        if result.url:
+                            cm.store_card_result(
+                                word=word, sense_id="",
+                                group="", visual_type="",
+                                image_url=result.url,
+                                clip_score=0.0,
+                                qc_verified=result.verified,
+                                qc_rounds=result.qc_rounds,
+                                resolved_by=result.resolved_by,
+                            )
+                            processed += 1
+                    except Exception:
+                        pass
+
+            except Exception:
+                pass
+            return processed
+
+        def _on_done(processed):
+            self._active = False
+            logger.info("IdlePrefetch: cached %d cards", processed or 0)
+            self._schedule_next()
+
+        from aqt.operations import QueryOp
+        op = QueryOp(parent=self._mw, op=_work, success=_on_done)
+        op.run_in_background()

@@ -833,6 +833,58 @@ class ConfigDialog(QDialog):
             self.gemini_eval_inputs.append(inp)
         layout.addWidget(card_eval)
 
+        # ── Pipeline & Cache (GĐ5) ──────────────────────────────────────
+        card_pipe, pc_layout = settings_section(
+            title="Pipeline  ·  Cache  ·  Telemetry",
+            subtitle="Cấu hình luồng xử lý, cache SQLite, và đo lường.",
+            icon="🔧"
+        )
+
+        pc_layout.addWidget(field_row("CLIP tier"))
+        self.clip_tier_combo = QComboBox()
+        self.clip_tier_combo.addItem("Tự động (khuyên dùng)", "auto")
+        self.clip_tier_combo.addItem("Đầy đủ (ONNX fp16/fp32)", "full")
+        self.clip_tier_combo.addItem("Lượng tử hoá (INT8)", "quantized")
+        self.clip_tier_combo.addItem("Heuristic thuần (không ONNX)", "heuristic")
+        pc_layout.addWidget(self.clip_tier_combo)
+
+        self.strict_accuracy_checkbox = QCheckBox(
+            "Chế độ chính xác tuyệt đối — không gắn ảnh chưa xác thực (⚠ unverified)"
+        )
+        pc_layout.addWidget(self.strict_accuracy_checkbox)
+
+        self.idle_prefetch_checkbox = QCheckBox(
+            "Tận dụng thời gian rảnh để xử lý trước (idle prefetch)"
+        )
+        self.idle_prefetch_checkbox.setChecked(True)
+        pc_layout.addWidget(self.idle_prefetch_checkbox)
+
+        prefetch_row = QHBoxLayout()
+        prefetch_row.setSpacing(12)
+        pf_lbl = QLabel("Số thẻ xử lý trước mỗi lần rảnh:")
+        pf_lbl.setProperty("fieldLabel", True)
+        prefetch_row.addWidget(pf_lbl)
+        self.idle_prefetch_batch_spin = QSpinBox()
+        self.idle_prefetch_batch_spin.setRange(1, 100)
+        self.idle_prefetch_batch_spin.setValue(20)
+        self.idle_prefetch_batch_spin.setFixedWidth(80)
+        prefetch_row.addWidget(self.idle_prefetch_batch_spin)
+        prefetch_row.addStretch()
+        pc_layout.addLayout(prefetch_row)
+
+        self.url_only_mode_checkbox = QCheckBox(
+            "Chỉ dùng URL (không tải ảnh về — cần mạng khi học)"
+        )
+        pc_layout.addWidget(self.url_only_mode_checkbox)
+
+        self.telemetry_checkbox = QCheckBox(
+            "Ghi đo lường cục bộ (latency, CLIP score, QC rounds)"
+        )
+        self.telemetry_checkbox.setChecked(True)
+        pc_layout.addWidget(self.telemetry_checkbox)
+
+        layout.addWidget(card_pipe)
+
         layout.addStretch()
         scroll.setWidget(body)
         tab_layout = QVBoxLayout(tab)
@@ -879,6 +931,16 @@ class ConfigDialog(QDialog):
             self.imagen_style_combo.setCurrentText(self.existing_config.get("imagen_default_style", "photorealistic"))
             self.imagen_size_combo.setCurrentText(self.existing_config.get("imagen_default_size", "1024x1024"))
             self.imagen_fallback_checkbox.setChecked(bool(self.existing_config.get("imagen_fallback_to_search_providers", True)))
+            # GĐ5 Pipeline & Cache settings
+            clip_tier = self.existing_config.get("clip_tier", "auto")
+            ct_idx = self.clip_tier_combo.findData(clip_tier)
+            if ct_idx >= 0:
+                self.clip_tier_combo.setCurrentIndex(ct_idx)
+            self.strict_accuracy_checkbox.setChecked(bool(self.existing_config.get("strict_accuracy_mode", False)))
+            self.idle_prefetch_checkbox.setChecked(bool(self.existing_config.get("idle_prefetch_enabled", True)))
+            self.idle_prefetch_batch_spin.setValue(int(self.existing_config.get("idle_prefetch_batch", 20)))
+            self.url_only_mode_checkbox.setChecked(bool(self.existing_config.get("url_only_mode", False)))
+            self.telemetry_checkbox.setChecked(bool(self.existing_config.get("telemetry_enabled", True)))
         except Exception as e:
             logger.warning(f"Error loading config into dialog: {e}")
 
@@ -938,6 +1000,13 @@ class ConfigDialog(QDialog):
             "imagen_default_style": self.imagen_style_combo.currentText(),
             "imagen_default_size": self.imagen_size_combo.currentText(),
             "imagen_fallback_to_search_providers": self.imagen_fallback_checkbox.isChecked(),
+            # GĐ5 Pipeline & Cache
+            "clip_tier": self.clip_tier_combo.currentData() or "auto",
+            "strict_accuracy_mode": self.strict_accuracy_checkbox.isChecked(),
+            "idle_prefetch_enabled": self.idle_prefetch_checkbox.isChecked(),
+            "idle_prefetch_batch": self.idle_prefetch_batch_spin.value(),
+            "url_only_mode": self.url_only_mode_checkbox.isChecked(),
+            "telemetry_enabled": self.telemetry_checkbox.isChecked(),
         }
 
     # ── TEST CONNECTIONS ─────────────────────────────────────────────────────
@@ -1314,3 +1383,149 @@ def get_note_data(note) -> tuple:
     except Exception as e:
         logger.warning(f"Error getting note data: {e}")
         return "", ""
+
+
+# ============================================================================
+# 7. GĐ5 WIDGETS — Feedback, Quota Display, Verification Badge  [MS §18]
+# ============================================================================
+
+class FeedbackWidget(QWidget):
+    """👍 / 👎 buttons for a single image result.
+
+    Call ``on_vote(callback)`` to register a handler: ``callback(word, vote)``.
+
+    Usage::
+
+        fb = FeedbackWidget(word="tactics")
+        fb.on_vote(lambda w, v: telemetry.feedback(w, v))
+    """
+
+    def __init__(self, word: str = "", parent=None):
+        super().__init__(parent)
+        self._word = word
+        self._vote_callback: Optional[Callable] = None
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self._up_btn = QToolButton()
+        self._up_btn.setText("👍")
+        self._up_btn.setToolTip("Ảnh này phù hợp")
+        self._up_btn.clicked.connect(lambda: self._vote("👍"))
+        layout.addWidget(self._up_btn)
+
+        self._down_btn = QToolButton()
+        self._down_btn.setText("👎")
+        self._down_btn.setToolTip("Ảnh này không phù hợp")
+        self._down_btn.clicked.connect(lambda: self._vote("👎"))
+        layout.addWidget(self._down_btn)
+
+        layout.addStretch()
+
+    def on_vote(self, callback: Callable):
+        """Register a handler: ``callback(word, "👍" | "👎")``."""
+        self._vote_callback = callback
+
+    def _vote(self, vote: str):
+        self._up_btn.setEnabled(False)
+        self._down_btn.setEnabled(False)
+        if self._vote_callback:
+            self._vote_callback(self._word, vote)
+
+    @property
+    def word(self) -> str:
+        return self._word
+
+
+class QuotaDisplayWidget(QWidget):
+    """Compact quota remaining readout from QuotaManager.
+
+    Shows per-model: ``Groq: 12,340/14,400 today`` etc.
+    Updates when ``refresh()`` is called.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+
+        title = QLabel("AI Hạn mức hôm nay")
+        title.setProperty("fieldLabel", True)
+        layout.addWidget(title)
+
+        self._labels: Dict[str, QLabel] = {}
+        for model_key in ("groq_workhorse", "groq_hard", "gemini_vision"):
+            lbl = QLabel(f"{model_key}: —")
+            lbl.setProperty("hint", True)
+            layout.addWidget(lbl)
+            self._labels[model_key] = lbl
+
+    def refresh(self, quota_manager=None):
+        """Update display from a QuotaManager snapshot."""
+        if quota_manager is None:
+            return
+        try:
+            snap = quota_manager.snapshot()
+        except Exception:
+            return
+        for key, lbl in self._labels.items():
+            bucket = snap.get(key)
+            if bucket:
+                used = bucket.get("rpd_used", 0)
+                limit = bucket.get("rpd_limit", 0)
+                remaining = max(limit - used, 0)
+                lbl.setText(f"{key}: {remaining:,}/{limit:,}")
+                # Color-code: green if >50%, yellow if >20%, red if ≤20%
+                if limit > 0:
+                    pct = remaining / limit
+                    tokens = get_tokens()
+                    if pct > 0.5:
+                        color = tokens.get("success", "#4CAF50")
+                    elif pct > 0.2:
+                        color = tokens.get("warning", "#FF9800")
+                    else:
+                        color = tokens.get("danger", "#F44336")
+                    lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
+            else:
+                lbl.setText(f"{key}: không có")
+
+
+class VerificationBadge(QLabel):
+    """✓ QC-verified  /  ⚠ unverified  badge for a card.
+
+    Usage::
+
+        badge = VerificationBadge(verified=True)
+        badge.set_verified(False)  # update later
+    """
+
+    def __init__(self, verified: bool = False, parent=None):
+        super().__init__(parent)
+        self.set_verified(verified)
+
+    def set_verified(self, verified: bool):
+        self._verified = verified
+        tokens = get_tokens()
+        if verified:
+            self.setText("✓ QC-verified")
+            self.setStyleSheet(
+                f"color: {tokens.get('success', '#4CAF50')}; "
+                f"background: {tokens.get('success_bg', '#1a2e1a')}; "
+                f"border: 1px solid {tokens.get('success', '#4CAF50')}; "
+                f"border-radius: 4px; padding: 1px 7px; font-size: 11px; "
+                f"font-weight: 600;"
+            )
+        else:
+            self.setText("⚠ unverified")
+            self.setStyleSheet(
+                f"color: {tokens.get('warning', '#FF9800')}; "
+                f"background: {tokens.get('warning_bg', '#2e2a1a')}; "
+                f"border: 1px solid {tokens.get('warning', '#FF9800')}; "
+                f"border-radius: 4px; padding: 1px 7px; font-size: 11px; "
+                f"font-weight: 600;"
+            )
+
+    @property
+    def verified(self) -> bool:
+        return self._verified

@@ -54,7 +54,7 @@ from .modules.ui import (
 from .modules.note_presets import get_preset, build_preset
 from .modules.api_handler import AIImageProvider, APIError
 from .modules.image_handler import ImageHandler, ImageError
-from .modules.bg_handler import BackgroundProcessor, ProcessingTask
+from .modules.bg_handler import BackgroundProcessor, ProcessingTask, RetryQueue, IdlePrefetch
 from .modules.features import FeatureDatabase, AdvancedFeatures
 from .modules.debug_log import configure as configure_debug_log, cursor_session_log
 from .modules.http_session_manager import HTTPSessionManager

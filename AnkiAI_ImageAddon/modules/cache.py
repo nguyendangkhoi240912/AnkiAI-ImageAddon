@@ -184,6 +184,23 @@ CREATE TABLE IF NOT EXISTS processed_notes (
     note_id     INTEGER PRIMARY KEY,
     imported_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now'))
 );
+
+-- Retry queue (GĐ5, G5.3): failed cards awaiting background retry
+CREATE TABLE IF NOT EXISTS retry_queue (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    note_id         INTEGER NOT NULL,
+    word            TEXT NOT NULL DEFAULT '',
+    sentence        TEXT NOT NULL DEFAULT '',
+    error_msg       TEXT NOT NULL DEFAULT '',
+    failed_step     TEXT NOT NULL DEFAULT '',
+    retry_count     INTEGER NOT NULL DEFAULT 0,
+    max_retries     INTEGER NOT NULL DEFAULT 3,
+    next_retry_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+    last_error_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_retry_queue_next ON retry_queue(next_retry_at);
+CREATE INDEX IF NOT EXISTS idx_retry_queue_note ON retry_queue(note_id);
 """
 
 
@@ -597,6 +614,119 @@ class CacheManager:
             self._conn.commit()
 
     # ------------------------------------------------------------------
+    # Retry queue (GĐ5, G5.3)
+    # ------------------------------------------------------------------
+
+    def retry_enqueue(
+        self,
+        note_id: int,
+        word: str = "",
+        sentence: str = "",
+        error_msg: str = "",
+        failed_step: str = "",
+        max_retries: int = 3,
+    ) -> None:
+        """Add a failed card to the retry queue."""
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO retry_queue "
+                "(note_id, word, sentence, error_msg, failed_step, "
+                "max_retries, next_retry_at, created_at, last_error_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (note_id, word, sentence, error_msg, failed_step,
+                 max_retries, now, now, now),
+            )
+            self._conn.commit()
+
+    def retry_dequeue(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return up to *limit* items due for retry (next_retry_at <= now)."""
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT id, note_id, word, sentence, error_msg, failed_step, "
+                "retry_count, max_retries "
+                "FROM retry_queue WHERE next_retry_at <= ? "
+                "ORDER BY next_retry_at ASC LIMIT ?",
+                (now, limit),
+            )
+            rows = cur.fetchall()
+        return [
+            {
+                "id": r[0], "note_id": r[1], "word": r[2], "sentence": r[3],
+                "error_msg": r[4], "failed_step": r[5],
+                "retry_count": r[6], "max_retries": r[7],
+            }
+            for r in rows
+        ]
+
+    def retry_mark_attempt(self, item_id: int, error_msg: str = "") -> None:
+        """Increment retry_count; schedule next attempt with exponential backoff.
+
+        If retry_count >= max_retries, the item stays but won't be dequeued
+        again (next_retry_at set far future).
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT retry_count, max_retries FROM retry_queue WHERE id = ?",
+                (item_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return
+            count, max_r = row
+            count += 1
+            if count >= max_r:
+                # Exhausted retries — park in far future
+                next_at = "2099-12-31T23:59:59"
+            else:
+                # Exponential backoff: 30s, 60s, 120s, 240s …
+                delay = 30 * (2 ** min(count - 1, 6))
+                next_dt = datetime.now(timezone.utc) + __import__("datetime").timedelta(seconds=delay)
+                next_at = next_dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            self._conn.execute(
+                "UPDATE retry_queue SET retry_count = ?, next_retry_at = ?, "
+                "error_msg = ?, last_error_at = ? WHERE id = ?",
+                (count, next_at, error_msg, now, item_id),
+            )
+            self._conn.commit()
+
+    def retry_remove(self, item_id: int) -> None:
+        """Remove an item from the retry queue (success or user cancel)."""
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM retry_queue WHERE id = ?", (item_id,),
+            )
+            self._conn.commit()
+
+    def retry_count(self) -> int:
+        """Return number of items still eligible for retry."""
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT COUNT(*) FROM retry_queue WHERE next_retry_at <= ?",
+                (now,),
+            )
+            return cur.fetchone()[0]
+
+    def retry_purge_exhausted(self) -> int:
+        """Remove items that have exhausted all retries."""
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM retry_queue WHERE retry_count >= max_retries"
+            )
+            self._conn.commit()
+            return cur.rowcount
+
+    def retry_clear(self) -> None:
+        """Remove all items from the retry queue."""
+        with self._lock:
+            self._conn.execute("DELETE FROM retry_queue")
+            self._conn.commit()
+
+    # ------------------------------------------------------------------
     # Stats & diagnostics
     # ------------------------------------------------------------------
 
@@ -606,7 +736,7 @@ class CacheManager:
             result = {}
             for table in (
                 "cache_l1", "cache_l2", "cache_l3", "cache_l4",
-                "telemetry", "processed_notes",
+                "telemetry", "processed_notes", "retry_queue",
             ):
                 cur = self._conn.execute(
                     f"SELECT COUNT(*) FROM {table}"  # safe: table names are hardcoded
@@ -673,6 +803,161 @@ class CacheManager:
         """Run VACUUM to reclaim space."""
         with self._lock:
             self._conn.execute("VACUUM")
+
+    # ------------------------------------------------------------------
+    # Community cache export/import (GĐ6, G6.1)                  [MS §12]
+    # ------------------------------------------------------------------
+
+    _COMMUNITY_PACK_VERSION = 1
+    _COMMUNITY_ANONYMOUS_FIELDS = (
+        "word", "sense_id", "group_", "visual_type", "image_url",
+        "clip_score", "qc_verified", "source_provider", "attribution",
+    )
+
+    def community_export(self) -> Dict[str, Any]:
+        """Export L1/L2 entries as an anonymous pack.
+
+        Only includes: word, sense_id, group, visual_type, url,
+        clip_score, source_provider, attribution.  No sentence examples
+        or user-identifying data.
+
+        Returns a dict suitable for ``json.dump()``.
+        """
+        entries = []
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT word, sense_id, group_, visual_type, image_url, "
+                "clip_score, qc_verified, source_provider, attribution "
+                "FROM cache_l1"
+            )
+            rows = cur.fetchall()
+
+        for r in rows:
+            entries.append({
+                "word": r[0],
+                "sense_id": r[1],
+                "group": r[2],
+                "visual_type": r[3],
+                "url": r[4],
+                "clip_score": r[5],
+                "qc_verified": bool(r[6]),
+                "source_provider": r[7],
+                "attribution": r[8],
+            })
+
+        # Also export L2 (query data, no URLs)
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT word, sense_id, group_, visual_type, query, en_query "
+                "FROM cache_l2"
+            )
+            l2_rows = cur.fetchall()
+
+        l2_entries = []
+        for r in l2_rows:
+            l2_entries.append({
+                "word": r[0],
+                "sense_id": r[1],
+                "group": r[2],
+                "visual_type": r[3],
+                "query": r[4],
+                "en_query": r[5],
+            })
+
+        return {
+            "version": self._COMMUNITY_PACK_VERSION,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "l1_count": len(entries),
+            "l2_count": len(l2_entries),
+            "l1": entries,
+            "l2": l2_entries,
+        }
+
+    def community_export_to_file(self, path: str) -> int:
+        """Write anonymous pack to *path*. Returns number of L1 entries."""
+        pack = self.community_export()
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(pack, fh, ensure_ascii=False, indent=2)
+        return pack["l1_count"]
+
+    def community_import(self, pack: Dict[str, Any]) -> Dict[str, int]:
+        """Import an anonymous pack into the cache.
+
+        **Local data always wins on conflict** — existing entries are
+        never overwritten by imported data.
+
+        Returns ``{"l1_imported": int, "l2_imported": int}``.
+        """
+        version = pack.get("version", 0)
+        if version != self._COMMUNITY_PACK_VERSION:
+            logger.warning(
+                "Community pack version %s != expected %s; skipping",
+                version, self._COMMUNITY_PACK_VERSION,
+            )
+            return {"l1_imported": 0, "l2_imported": 0}
+
+        l1_imported = 0
+        l2_imported = 0
+
+        # Import L1 entries (skip if word+sense_id already exists)
+        for entry in pack.get("l1", []):
+            word = entry.get("word", "")
+            sense_id = entry.get("sense_id", "")
+            if not word:
+                continue
+            # Check if local entry exists — local wins
+            existing = self.l1_lookup(word, sense_id)
+            if existing is not None:
+                continue
+            self.l1_store(L1Entry(
+                word=word, sense_id=sense_id,
+                group=entry.get("group", ""),
+                visual_type=entry.get("visual_type", ""),
+                image_url=entry.get("url", ""),
+                clip_score=entry.get("clip_score", 0.0),
+                qc_verified=entry.get("qc_verified", False),
+                qc_rounds=0,
+                source_provider=entry.get("source_provider", ""),
+                attribution=entry.get("attribution", ""),
+                resolved_by="community",
+                last_verified="",
+                flagged_for_review=False,
+            ))
+            l1_imported += 1
+
+        # Import L2 entries (skip if word+sense_id already exists)
+        for entry in pack.get("l2", []):
+            word = entry.get("word", "")
+            sense_id = entry.get("sense_id", "")
+            if not word:
+                continue
+            existing = self.l2_lookup(word, sense_id)
+            if existing is not None:
+                continue
+            self.l2_store(L2Entry(
+                word=word, sense_id=sense_id,
+                group=entry.get("group", ""),
+                visual_type=entry.get("visual_type", ""),
+                query=entry.get("query", ""),
+                en_query=entry.get("en_query", ""),
+            ))
+            l2_imported += 1
+
+        logger.info(
+            "Community cache import: %d L1 + %d L2 entries",
+            l1_imported, l2_imported,
+        )
+        return {"l1_imported": l1_imported, "l2_imported": l2_imported}
+
+    def community_import_from_file(self, path: str) -> Dict[str, int]:
+        """Read pack from *path* and import. Returns import counts."""
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                pack = json.load(fh)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Community pack unreadable (%s): %s", path, exc)
+            return {"l1_imported": 0, "l2_imported": 0}
+        return self.community_import(pack)
 
     def __repr__(self) -> str:
         return f"<CacheManager db={self._db_path!r}>"
