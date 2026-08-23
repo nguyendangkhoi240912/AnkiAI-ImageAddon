@@ -106,11 +106,35 @@ class QuotaManager:
 
     # Default limits (overridden from config in __init__)
     _DEFAULT_LIMITS: Dict[str, Dict] = {
+        # AI models
         "groq_workhorse": {"rpd": 14400, "rpm": 30, "tpm": 6000},
         "groq_hard":      {"rpd": 2000,  "rpm": 10, "tpm": 4000},
         "groq_vision":    {"rpd": 500,   "rpm": 10, "tpm": 2000},
         "gemini_vision":  {"rpd": 1500,  "rpm": 15, "tpm": 4000},
         "gemini_text":    {"rpd": 1500,  "rpm": 15, "tpm": 4000},
+        # New image providers (§7.2 Integration Spec)
+        "wikipedia":      {"rpd": 5000,  "rpm": 8},
+        "wikidata":       {"rpd": 5000,  "rpm": 10},
+        "smithsonian":    {"rpd": 1000,  "rpm": 20},
+        "artic":          {"rpd": 1000,  "rpm": 20},
+        "cleveland":      {"rpd": 1000,  "rpm": 20},
+        "flickr_cc":      {"rpd": 3600,  "rpm": 60},
+        "themealdb":      {"rpd": 500,   "rpm": 10},
+        "biodiversity":   {"rpd": 1000,  "rpm": 20},
+        "iconify":        {"rpd": 1000,  "rpm": 20},
+        "noun_project":   {"rpd": 100,   "rpm": 5},
+        "storyset":       {"rpd": 100,   "rpm": 5},
+        "pollinations":   {"rpd": 200,   "rpm": 5},
+        "huggingface":    {"rpd": 50,    "rpm": 3},
+        "quickchart":     {"rpd": 1000,  "rpm": 20},
+        # Tier 2 (local index) — effectively unlimited
+        "undraw":         {"rpd": 99999, "rpm": 999},
+        "openmoji":       {"rpd": 99999, "rpm": 999},
+        "noto_emoji":     {"rpd": 99999, "rpm": 999},
+        "flagcdn":        {"rpd": 99999, "rpm": 999},
+        "gameicons":      {"rpd": 99999, "rpm": 999},
+        "openclipart":    {"rpd": 99999, "rpm": 999},
+        "mermaid":        {"rpd": 99999, "rpm": 999},
     }
 
     def __init__(self, config=None):

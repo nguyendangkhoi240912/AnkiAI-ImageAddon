@@ -23,10 +23,15 @@ AnkiAI-ImageAddon.worktrees/
 
 # Add-on user data / cache files — runtime-generated, not tracked
 AnkiAI_ImageAddon/user_files/*.sqlite
+AnkiAI_ImageAddon/user_files/*.sqlite-*
+AnkiAI_ImageAddon/user_files/migration.done
 AnkiAI_ImageAddon/user_files/models/
 AnkiAI_ImageAddon/user_files/logs/
 AnkiAI_ImageAddon/user_files/anki_image_cache.json
 AnkiAI_ImageAddon/user_files/eval_set/
+AnkiAI_ImageAddon/user_files/hf_cache/
+AnkiAI_ImageAddon/user_files/svg_cache/
+AnkiAI_ImageAddon/user_files/*_index.json
 !AnkiAI_ImageAddon/user_files/.gitkeep
 # concept_metaphor_map.json IS tracked (editable config, not runtime cache)
 

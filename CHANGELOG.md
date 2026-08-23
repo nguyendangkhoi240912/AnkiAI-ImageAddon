@@ -2,6 +2,61 @@
 
 ---
 
+## Version 6.1 — 21 New Image Providers (August 2026)
+
+### 🆕 21 nguồn ảnh mới theo chuẩn BaseProvider (§17.2)
+
+Tích hợp 21 nguồn ảnh mới vào `image_providers/`, phân loại theo 4 thư mục:
+`static/`, `icon/`, `diagram/`, `ai_generation/`.
+
+#### Static providers (7)
+- **Wikipedia REST API** — 2-step search (article → lead image), CC-BY-SA-3.0
+- **Wikidata** — QID → P18 image property → Commons URL, CC0
+- **Smithsonian Open Access** — museum artifacts, Public Domain
+- **Art Institute of Chicago + Cleveland Museum** — combined ArtMuseumProvider, IIIF URLs, Public Domain / CC0
+- **Flickr CC-only** — NewFlickrProvider, only Creative Commons licenses (4,5,6,7,9,10) + SafeSearch, requires API key
+- **TheMealDB** — food photos, CC-BY
+- **Biodiversity Heritage Library** — scientific illustrations, Public Domain
+
+#### Icon providers (7)
+- **Iconify** — icon search API, MIT/Apache license
+- **The Noun Project** — OAuth2 client_credentials, CC-BY-3.0
+- **OpenMoji** — local index (`emoji_index.json`), CC-BY-SA-4.0
+- **Noto Emoji** — Google Fonts SVG, shares index with OpenMoji, Apache-2.0
+- **FlagCDN** — country flag SVGs via local index, Public Domain
+- **Game-icons.net** — local index, CC-BY-3.0
+- **Openclipart** — SVG search, CC0
+
+#### Diagram providers (4)
+- **mermaid.ink** — generates diagrams from Mermaid.js code (stateless URL construction), MIT
+- **QuickChart.io** — generates Chart.js charts from config, MIT
+- **Storyset** — illustration search API, CC-BY-4.0
+- **unDraw** — local index + color customization, MIT
+
+#### AI generation providers (2) — chốt chặn cuối cùng (§16)
+- **Pollinations.ai** — stateless URL construction, metaphor_photo, CC-BY
+- **Hugging Face Inference** — SDXL, saves to `user_files/hf_cache/`, metaphor_photo, CC-BY
+- ⚠️ Cả hai BẮT BUỘC vision QC, KHÔNG dùng visual_type "ai_generated"
+
+### 🔧 Integration changes
+
+- `config.py` → v10: 20+ config keys mới (provider_timeout_s, wikipedia_api_base, iconify_base, pollinations_base_url, huggingface_api_token, etc.)
+- `provider_registry.py` → v6.0: `_BaseProviderAdapter` (bridge BaseProvider → SmartImageSelector), `_ensure_factories()` lazy imports, `PROVIDER_CHAINS` cho 14 nhóm A–N
+- `quota.py` → 26 provider quota entries (wikipedia: 5000 rpd, huggingface: 50 rpd, tier-2 unlimited)
+- `pipeline.py` → `get_provider_chain(group)` helper
+
+### 🧹 Cleanup
+
+- Xoá 3 test file rác ở root (`test_entertainment_providers.py`, `test_failover_and_fallback.py`, `test_imagen_integration.py`)
+- Dời `UI_REDESIGN_PLAN.md` → `docs/archive/`
+- `.gitignore` thêm: `*.sqlite-*`, `migration.done`, `hf_cache/`, `svg_cache/`, `*_index.json`
+
+### 🧪 Tests
+
+- `test_new_providers_contract.py`: 62 tests — BaseProvider interface, name, visual_type validation, error handling, provider chains, Candidate dataclass
+
+---
+
 ## Version 6.0 — Pipeline Accuracy-First (August 2026)
 
 ### 🏗️ Kiến trúc mới hoàn toàn

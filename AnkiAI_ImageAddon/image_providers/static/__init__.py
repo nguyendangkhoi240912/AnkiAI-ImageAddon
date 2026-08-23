@@ -2,11 +2,9 @@
 
 from ...modules.providers.general import (
     PixabayProvider,
-    FlickrProvider,
     GoogleCSEProvider,
     DuckDuckGoImagesProvider,
     YandexImagesProvider,
-    NounProjectProvider,
 )
 from ...modules.providers.legacy_free import (
     PexelsProvider,
@@ -18,13 +16,21 @@ from ...modules.providers.legacy_free import (
     EuropeanaProvider,
 )
 
+# New providers (BaseProvider interface)
+from .wikipedia_provider import WikipediaProvider
+from .wikidata_provider import WikidataProvider
+from .smithsonian_provider import SmithsonianProvider
+from .art_museum_provider import ArtMuseumProvider
+from .flickr_provider import NewFlickrProvider
+from .themealdb_provider import TheMealDBProvider
+from .biodiversity_provider import BiodiversityProvider
+
 __all__ = [
+    # Legacy (modules/providers/)
     "PixabayProvider",
-    "FlickrProvider",
     "GoogleCSEProvider",
     "DuckDuckGoImagesProvider",
     "YandexImagesProvider",
-    "NounProjectProvider",
     "PexelsProvider",
     "UnsplashProvider",
     "OpenverseProvider",
@@ -32,4 +38,12 @@ __all__ = [
     "LibraryOfCongressProvider",
     "MetMuseumProvider",
     "EuropeanaProvider",
+    # New (BaseProvider interface)
+    "WikipediaProvider",
+    "WikidataProvider",
+    "SmithsonianProvider",
+    "ArtMuseumProvider",
+    "NewFlickrProvider",
+    "TheMealDBProvider",
+    "BiodiversityProvider",
 ]

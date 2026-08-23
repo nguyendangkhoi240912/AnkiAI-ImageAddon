@@ -39,7 +39,7 @@ Từ vựng + Câu ví dụ
 AnkiAI_ImageAddon/
 ├── __init__.py                  # Entry point + AddImageTask + Browser menu hooks
 ├── modules/
-│   ├── config.py                # ConfigManager (v9, auto-upgrader, 35+ keys)
+│   ├── config.py                # ConfigManager (v10, auto-upgrader, 55+ keys)
 │   ├── pipeline.py              # Orchestrator Accuracy-First + budget governor
 │   ├── cache.py                 # CacheManager: SQLite 4-tier + retry queue + community
 │   ├── bg_handler.py            # BackgroundProcessor + RetryQueue + IdlePrefetch
@@ -96,7 +96,30 @@ AnkiAI_ImageAddon/
 │   ├── health.py                # HealthBoard: EMA latency/success, fallback động
 │   ├── svg_engine.py            # ~26 SVG template (K: giới từ, N: công thức)
 │   ├── local_svg_provider.py    # Data-URI SVG, 0 network, score=1.0
-│   ├── static/                  # Static image providers (contract)
+│   ├── static/                  # Static image providers
+│   │   ├── wikipedia_provider.py    # Wikipedia REST API — 2-step search
+│   │   ├── wikidata_provider.py     # Wikidata QID → P18 → Commons URL
+│   │   ├── smithsonian_provider.py  # Smithsonian Open Access
+│   │   ├── art_museum_provider.py   # Art Institute Chicago + Cleveland Museum
+│   │   ├── flickr_provider.py       # Flickr CC-only (NewFlickrProvider)
+│   │   ├── themealdb_provider.py    # TheMealDB food photos
+│   │   └── biodiversity_provider.py # Biodiversity Heritage Library
+│   ├── icon/                    # Icon providers
+│   │   ├── iconify_provider.py      # Iconify search API
+│   │   ├── noun_project_provider.py # Noun Project OAuth2
+│   │   ├── openmoji_provider.py     # OpenMoji local index
+│   │   ├── noto_emoji_provider.py   # Noto Emoji local index
+│   │   ├── flagcdn_provider.py      # FlagCDN local index
+│   │   ├── gameicons_provider.py    # Game-icons.net local index
+│   │   └── openclipart_provider.py  # Openclipart SVG search
+│   ├── diagram/                 # Diagram providers
+│   │   ├── mermaid_provider.py      # mermaid.ink — generates from code
+│   │   ├── quickchart_provider.py   # QuickChart.io — generates charts
+│   │   ├── storyset_provider.py     # Storyset illustration search
+│   │   └── undraw_provider.py       # unDraw local index + color
+│   ├── ai_generation/           # AI generation — chốt chặn cuối cùng (§16)
+│   │   ├── pollinations_provider.py # Pollinations.ai stateless URL
+│   │   └── huggingface_provider.py  # HuggingFace SDXL + local cache
 │   ├── animated/                # Animated providers (contract)
 │   ├── scientific/              # Scientific providers (contract)
 │   └── wikimedia/               # Wikimedia providers (contract)
@@ -107,6 +130,12 @@ AnkiAI_ImageAddon/
     ├── logs/                    # Rotating logs (3×1 MB)
     ├── eval_set/                # Eval set 153 từ gán nhãn
     ├── concept_metaphor_map.json  # Proxy families
+    ├── undraw_index.json        # unDraw SVG index (~2MB, download 1 lần)
+    ├── emoji_index.json         # OpenMoji/Noto Emoji index (~1MB)
+    ├── flags_index.json         # FlagCDN country index (~100KB)
+    ├── gameicons_index.json     # Game-icons.net index (~2MB)
+    ├── svg_cache/               # SVG đã download (unDraw, Openclipart, OpenMoji, Game-icons)
+    ├── hf_cache/                # HuggingFace AI-generated images
     └── .gitkeep
 ```
 
@@ -287,12 +316,75 @@ Dynamic provider ordering dựa trên EMA latency/success:
 
 ### Config (`modules/config.py`)
 
-`ConfigManager` singleton, version 9:
-- `CURRENT_CONFIG_VERSION = 9`
+`ConfigManager` singleton, version 10:
+- `CURRENT_CONFIG_VERSION = 10`
 - `_upgrade_config()`: tự động nâng cấp từ version cũ
 - `_migrate_to_v9()`: migrate keys cũ → mới
+- `_migrate_to_v10()`: thêm 20+ config keys cho 21 provider mới
 - Key lạ → ignore + warn (không crash)
-- 35+ config keys (API keys, pipeline, cache, telemetry, UI)
+- 55+ config keys (API keys, pipeline, cache, telemetry, UI, providers)
+
+---
+
+### Provider Registry (`modules/provider_registry.py`)
+
+v6.0 — điều phối 40+ providers (legacy + mới):
+
+**`_BaseProviderAdapter`**: bridge BaseProvider (Candidate interface) → SmartImageSelector (dict interface), cho phép 21 provider mới hoạt động song song với legacy providers.
+
+**`PROVIDER_CHAINS`**: 14 nhóm A–N, mỗi nhóm có ordered fallback chain (§4.2):
+
+| Nhóm | visual_type | Provider chain (ưu tiên) |
+|------|-------------|--------------------------|
+| A | photo | wikipedia → wikidata → flickr_cc → pixabay → pexels |
+| B | photo | (như A, query theo nghĩa đã chọn) |
+| C | photo | wikipedia → flagcdn → smithsonian → artic → wikidata |
+| D | diagram/photo | biodiversity → smithsonian → wikipedia → wikimedia |
+| E | metaphor_photo | storyset → pollinations → huggingface |
+| F | diagram_or_map | mermaid → quickchart → storyset → wikimedia |
+| G | gif | klipy → giphy → pixabay_animated |
+| H | icon | iconify → gameicons → noun_project_new → iconscout |
+| I | photo | pixabay → pexels → flickr_cc → wikipedia |
+| J | metaphor_photo | storyset → pollinations → huggingface |
+| K | local_svg | svg_engine (0 request) |
+| L | metaphor_photo | storyset → openverse → giphy → pollinations |
+| M | none | **BỎ QUA** — không provider |
+| N | local_svg/diagram | svg_engine → quickchart → pubchem |
+
+**Priority tiers** (§3 nguyên tắc 1: "Local trước, AI sau"):
+- **Tier 1**: Cache hit + svg_engine nội bộ (~0 ms)
+- **Tier 2**: Static index đã cache local (~5 ms): unDraw, OpenMoji, Noto Emoji, FlagCDN, Game-icons, mermaid.ink, QuickChart
+- **Tier 3**: API miễn phí (~200–700 ms): Wikipedia, Wikidata, Smithsonian, Art museums, BHL, TheMealDB, Iconify, Storyset
+- **Tier 4**: API cần key (~300–800 ms): Flickr, Noun Project
+- **Tier 5**: AI generation — CHỐT CHẶN CUỐI CÙNG (~2000–5000 ms): Pollinations, HuggingFace — BẮT BUỘC vision QC
+
+---
+
+### 21 New Providers (`image_providers/`)
+
+Tất cả inherit `BaseProvider`, implement `search(query, visual_type, limit) → List[Candidate]`.
+
+**Common patterns:**
+- Synchronous (`requests.Session`, NO asyncio)
+- QuotaManager: `quota.allow()` trước mỗi API call, `quota.record()` sau
+- HealthBoard: `health.report()` sau mọi request
+- Config via `__init__(config={})` dict
+- Return `[]` on error (never crash)
+- Lazy singletons cho HealthBoard/QuotaManager
+
+**3 loại chiến lược search:**
+
+| Loại | Providers | Đặc điểm |
+|------|-----------|-----------|
+| **API per query** | Wikipedia, Wikidata, Smithsonian, Art Museum, Flickr, TheMealDB, Biodiversity, Iconify, Noun Project, Storyset, Openclipart | Gọi HTTP mỗi lần search |
+| **Local index** | OpenMoji, Noto Emoji, FlagCDN, Game-icons, unDraw | Download index 1 lần → search local → 0 API call sau |
+| **Generate (stateless)** | Mermaid, QuickChart, Pollinations | Construct URL từ code/prompt → không cần search API |
+
+**AI generation đặc biệt (§16):**
+- `PollinationsProvider`: stateless — chỉ construct URL, visual_type="metaphor_photo", score=0.6
+- `HuggingFaceProvider`: POST SDXL → save binary → `file://` URL, visual_type="metaphor_photo", score=0.5
+- Cả hai: KHÔNG dùng visual_type "ai_generated" (không hợp lệ theo §6)
+- Cả hai: BẮT BUỘC vision QC đồng bộ trước khi chấp nhận
 
 ---
 

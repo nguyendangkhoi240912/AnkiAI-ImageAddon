@@ -82,6 +82,12 @@ def _is_hard_group(group: str) -> bool:
     return group in ("B", "D", "E", "F", "H", "J", "L")
 
 
+def get_provider_chain(group: str) -> List[str]:
+    """Return the ordered provider chain for a word group (§4.2)."""
+    from AnkiAI_ImageAddon.modules.provider_registry import PROVIDER_CHAINS
+    return PROVIDER_CHAINS.get(group, PROVIDER_CHAINS.get("A", []))
+
+
 # ---------------------------------------------------------------------------
 # Main pipeline function
 # ---------------------------------------------------------------------------

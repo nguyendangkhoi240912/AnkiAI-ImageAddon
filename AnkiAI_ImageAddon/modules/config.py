@@ -19,7 +19,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-CURRENT_CONFIG_VERSION = 9
+CURRENT_CONFIG_VERSION = 10
 
 
 class ConfigManager:
@@ -27,7 +27,7 @@ class ConfigManager:
 
     DEFAULT_CONFIG = {
         # Config version — used by upgrader to apply migrations
-        "config_version": 9,
+        "config_version": 10,
 
         # GĐ2: CLIP reranker settings [MS §10, §21]
         "clip_tier": "auto",           # "auto" | "full" | "quantized" | "heuristic"
@@ -205,6 +205,77 @@ class ConfigManager:
         "community_cache_enabled": False,
         "community_cache_url": "",
 
+        # ── v6.0: 21 new provider config keys [MS §21, Integration Spec §8] ──
+
+        # Shared provider timeout
+        "provider_timeout_s": 5.0,
+
+        # Wikipedia REST API (no key needed)
+        "wikipedia_api_base": "https://en.wikipedia.org/api/rest_v1",
+
+        # Wikidata (no key needed)
+        "wikidata_api_base": "https://www.wikidata.org/w/api.php",
+
+        # Smithsonian Open Access (optional key for higher rate)
+        "smithsonian_api_base": "https://api.si.gov/v1/search",
+        "smithsonian_api_key": "",
+
+        # Art museums (no key needed)
+        "artic_api_base": "https://api.artic.edu/api/v1",
+        "cleveland_api_base": "https://openaccess-api.clevelandart.org/api",
+
+        # Flickr CC-only (key required — already exists as flickr_api_key)
+
+        # TheMealDB (no key needed)
+        "themealdb_base": "https://www.themealdb.com/api/json/v1/1",
+
+        # Biodiversity Heritage Library (no key needed)
+        "bhl_api_base": "https://www.biodiversitylibrary.org/api/v3",
+
+        # Iconify (no key needed)
+        "iconify_base": "https://api.iconify.design",
+
+        # The Noun Project (OAuth2 — keys already exist as noun_project_api_key/secret)
+
+        # OpenMoji (static index)
+        "openmoji_index_url": "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/data/openmoji.json",
+
+        # Noto Emoji (static from Google Fonts)
+        "noto_emoji_base_url": "https://fonts.gstatic.com/s/notoemoji/v1",
+
+        # FlagCDN (static index)
+        "flagcdn_index_url": "https://flagcdn.com/flags.json",
+
+        # Game-icons.net (static index)
+        "gameicons_index_url": "https://game-icons.net/data/json/icons.json",
+
+        # Openclipart (no key needed)
+        "openclipart_base": "https://openclipart.org",
+
+        # unDraw (static index)
+        "undraw_index_url": "https://undraw.co/api/images",
+        "undraw_accent_color": "#2196F3",
+
+        # Storyset (no key needed)
+        "storyset_api_base": "https://storyset.com/api",
+
+        # mermaid.ink (no key needed — generates diagrams)
+        "mermaid_base_url": "https://mermaid.ink",
+
+        # QuickChart.io (no key needed — generates charts)
+        "quickchart_base_url": "https://quickchart.io",
+        "chart_width": 400,
+        "chart_height": 300,
+
+        # Pollinations.ai (AI generation — no key needed)
+        "pollinations_base_url": "https://image.pollinations.ai/prompt",
+        "ai_image_width": 512,
+        "ai_image_height": 512,
+
+        # Hugging Face Inference (AI generation — token required)
+        "huggingface_api_token": "",
+        "huggingface_model": "stabilityai/stable-diffusion-xl-base-1.0",
+
     }
     
     # Tên thư mục addon (dùng để Anki đọc/ghi config đúng)
@@ -285,6 +356,8 @@ class ConfigManager:
         # Version-specific migrations
         if stored_version < 9:
             config = self._migrate_to_v9(config)
+        if stored_version < 10:
+            config = self._migrate_to_v10(config)
 
         config["config_version"] = CURRENT_CONFIG_VERSION
         return config
@@ -305,7 +378,21 @@ class ConfigManager:
         # clip keys guaranteed present after backfill above; nothing extra to migrate
         logger.info("Config migrated to v9")
         return config
-    
+
+    def _migrate_to_v10(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Migrations from v9 to v10: 21 new provider config keys."""
+        # All new keys already backfilled from DEFAULT_CONFIG above.
+        # Ensure numeric types for new keys.
+        for key in ("provider_timeout_s", "chart_width", "chart_height",
+                     "ai_image_width", "ai_image_height"):
+            if key in config:
+                try:
+                    config[key] = float(config[key]) if "timeout" in key else int(config[key])
+                except (ValueError, TypeError):
+                    config[key] = self.DEFAULT_CONFIG.get(key)
+        logger.info("Config migrated to v10 — 21 new provider keys added")
+        return config
+
     def reload(self):
         """Force reload config from disk"""
         self.config = self._load_config()
