@@ -63,6 +63,12 @@ class MockWidget:
     def setProperty(self, k, v):
         self._properties[k] = v
 
+    def __call__(self, *args, **kwargs):
+        # Support using MockWidget as a decorator (e.g., @pyqtSlot)
+        if len(args) == 1 and callable(args[0]):
+            return args[0]
+        return MagicMock()
+
     def __getattr__(self, name):
         mock = MagicMock()
         setattr(self, name, mock)
@@ -101,7 +107,8 @@ class MockFinder:
                 "QPushButton", "QWidget", "QProgressBar", "QLineEdit", "QTextBrowser",
                 "QCheckBox", "QSpinBox", "QFrame", "QScrollArea", "QTabWidget",
                 "QToolButton", "QSizePolicy", "QMessageBox", "QApplication", "QTimer",
-                "QAction", "QMenu", "Qt"
+                "QAction", "QMenu", "Qt", "QObject", "QPropertyAnimation", "QEasingCurve",
+                "QGraphicsOpacityEffect", "QTimeLine", "pyqtProperty", "pyqtSlot"
             ]
             for w in widgets:
                 setattr(m, w, MockWidget)

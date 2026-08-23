@@ -1,13 +1,12 @@
-"""Reusable Qt primitives for AnkiAI — Premium Futuristic Desktop Design.
+"""Reusable Qt primitives for AnkiAI — Cinematic Dark · Electric Cyan.
 
 Visual language:
-  - Midnight navy surfaces (#080A10 → #111520 elevation layers)
-  - Electric Blue (#00A3FF) accent on interactive + title elements
-  - Violet (#8A2BE2) secondary accent for selected/active states
-  - Blue→Violet gradient on primary CTA buttons
+  - Deep midnight foundation (#0a0e14) with 4-layer elevation
+  - Electric Cyan (#00b4d8) single accent — NO violet
+  - Gradient #0077ff → #00e5ff on primary CTA buttons
   - Strong white typography with cool muted secondaries
   - Thin 1px borders — structural but not dominant
-  - Restrained glow only on primary elements
+  - Cyan tinted skeleton shimmer
 
 Components:
     header_section      — Bold dialog header with accent rule
@@ -23,6 +22,9 @@ Components:
     divider             — Horizontal rule separator
     make_settings_card  — Backward-compat alias
     card_header         — Backward-compat card title label
+    QuotaRing           — Circular SVG quota arc indicator
+    StatCard            — Stat card with gradient number + label
+    ImagePreviewCard    — Image result card with thumbnail
 """
 
 from aqt.qt import (
@@ -34,7 +36,15 @@ from aqt.qt import (
     QPushButton,
     QWidget,
     QSizePolicy,
+    QPainter,
+    QColor,
+    QPen,
+    QFont,
 )
+try:
+    from aqt.qt import QRectF, Qt
+except ImportError:
+    from PyQt6.QtCore import QRectF, Qt
 from typing import Tuple, Optional
 from .ui_theme import get_tokens, is_dark_mode
 
@@ -266,8 +276,8 @@ class CredentialField(QWidget):
         self.toggle_btn.setToolTip("Hiện / Ẩn key")
         self.toggle_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {tokens['bg_elevated']};
-                color: {tokens['text_muted']};
+                background-color: {tokens['bg_surface']};
+                color: {tokens['text_low']};
                 border: 1px solid {tokens['border']};
                 border-radius: 8px;
                 font-size: 8px;
@@ -275,7 +285,7 @@ class CredentialField(QWidget):
                 padding: 0;
             }}
             QPushButton:hover {{
-                background-color: {tokens['bg_elevated2']};
+                background-color: {tokens['bg_raised']};
                 border-color: {tokens['border_accent']};
                 color: {tokens['accent']};
             }}
@@ -329,12 +339,12 @@ def status_badge(text: str, state: str = "info") -> QLabel:
 
     _MAP = {
         "running":  (tokens["accent"],     tokens["info_bg"],      "●"),
-        "paused":   (tokens["warning"],    tokens["warning_bg"],   "⏸"),
-        "success":  (tokens["success"],    tokens["success_bg"],   "✓"),
-        "warning":  (tokens["warning"],    tokens["warning_bg"],   "⚠"),
-        "error":    (tokens["danger"],     tokens["danger_bg"],    "✗"),
+        "paused":   (tokens["warn"],       tokens["warn_dim"],     "⏸"),
+        "success":  (tokens["ok"],         tokens["ok_dim"],       "✓"),
+        "warning":  (tokens["warn"],      tokens["warn_dim"],     "⚠"),
+        "error":    (tokens["danger"],     tokens["danger_dim"],   "✗"),
         "info":     (tokens["info"],       tokens["info_bg"],      "◆"),
-        "muted":    (tokens["text_muted"], tokens["bg_elevated"],  "○"),
+        "muted":    (tokens["text_low"],   tokens["bg_surface"],   "○"),
     }
 
     fg, bg, prefix = _MAP.get(state, _MAP["info"])
@@ -368,9 +378,9 @@ def info_banner(text: str, state: str = "info", icon: str = "") -> QFrame:
 
     _BANNER = {
         "info":    (tokens["info"],    tokens["info_bg"],    tokens["border_accent"], "ℹ"),
-        "warning": (tokens["warning"], tokens["warning_bg"], tokens["warning"],       "⚠"),
-        "error":   (tokens["danger"],  tokens["danger_bg"],  tokens["danger"],        "✗"),
-        "success": (tokens["success"], tokens["success_bg"], tokens["success"],       "✓"),
+        "warning": (tokens["warn"],    tokens["warn_dim"],   tokens["warn"],          "⚠"),
+        "error":   (tokens["danger"],  tokens["danger_dim"], tokens["danger"],        "✗"),
+        "success": (tokens["ok"],      tokens["ok_dim"],     tokens["ok"],            "✓"),
     }
     fg, bg, bdr, default_icon = _BANNER.get(state, _BANNER["info"])
     actual_icon = icon or default_icon
@@ -435,8 +445,8 @@ def stat_row_widget(
         )
         return lbl
 
-    s_lbl = _make_stat("✓", success, tokens["success"])
-    sk_lbl = _make_stat("⊘", skipped, tokens["text_muted"])
+    s_lbl = _make_stat("✓", success, tokens["ok"])
+    sk_lbl = _make_stat("⊘", skipped, tokens["text_low"])
     f_lbl = _make_stat("✗", failed, tokens["danger"])
 
     row.addWidget(s_lbl)
@@ -465,3 +475,249 @@ def divider() -> QFrame:
     line.setObjectName("headerRule")
     line.setFrameShape(QFrame.Shape.HLine)
     return line
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUOTA RING — circular arc quota indicator
+# ─────────────────────────────────────────────────────────────────────────────
+
+class QuotaRing(QWidget):
+    """Circular SVG-style quota ring with color-coded arc.
+
+    Usage::
+
+        ring = QuotaRing(size=52)
+        ring.set_quota(0.72, "14.337")  # 72% remaining
+
+    Colour thresholds (per File 4 §2.3):
+        pct > 0.35  → ok    (#3fb950)
+        pct > 0.12  → warn  (#d29922)
+        else        → danger (#f85149)
+    """
+
+    def __init__(self, size: int = 52, parent=None):
+        super().__init__(parent)
+        self._size = size
+        self._pct = 1.0
+        self._label = ""
+        self.setFixedSize(size, size)
+        self.setStyleSheet("background: transparent;")
+
+    def set_quota(self, pct: float, label: str = "") -> None:
+        """Update the ring arc and label.
+
+        Args:
+            pct: 0.0–1.0 remaining quota fraction.
+            label: Short text drawn inside the ring (e.g. "14.337").
+        """
+        self._pct = max(0.0, min(1.0, pct))
+        self._label = label
+        self.update()
+
+    def _arc_color(self) -> str:
+        tokens = get_tokens()
+        if self._pct > 0.35:
+            return tokens["ok"]
+        elif self._pct > 0.12:
+            return tokens["warn"]
+        return tokens["danger"]
+
+    def paintEvent(self, _event) -> None:
+        tokens = get_tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        s = self._size
+        margin = 5
+        pen_w = 4
+        r = (s - margin * 2 - pen_w) / 2.0
+        cx, cy = s / 2.0, s / 2.0
+
+        # Background track
+        pen = QPen(QColor(tokens["bg_raised"]), pen_w)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.drawArc(QRectF(cx - r, cy - r, r * 2, r * 2), 0, 360 * 16)
+
+        # Foreground arc
+        arc_color = QColor(self._arc_color())
+        pen2 = QPen(arc_color, pen_w)
+        pen2.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen2)
+        span = int(360 * 16 * self._pct)
+        p.drawArc(QRectF(cx - r, cy - r, r * 2, r * 2), 90 * 16, -span)
+
+        # Percentage text
+        pct_str = f"{int(self._pct * 100)}%"
+        font = QFont("JetBrains Mono", 10, 700)
+        p.setFont(font)
+        p.setPen(QColor(tokens["text_hi"]))
+        p.drawText(QRectF(0, 0, s, s), Qt.AlignmentFlag.AlignCenter, pct_str)
+
+        p.end()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAT CARD
+# ─────────────────────────────────────────────────────────────────────────────
+
+class StatCard(QFrame):
+    """Dark elevated card with a large stat number, label, and optional trend.
+
+    Usage::
+
+        card = StatCard("14.337", "Hạn mức còn lại", trend="↑ 12%")
+    """
+
+    def __init__(self, value: str = "", label: str = "",
+                 trend: str = "", parent=None):
+        super().__init__(parent)
+        self.setObjectName("statCard")
+        tokens = get_tokens()
+
+        self.setStyleSheet(
+            f"QFrame#statCard {{ background-color: {tokens['bg_raised']}; "
+            f"border: 1px solid {tokens['border']}; border-radius: 10px; }}"
+        )
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(4)
+
+        self._val = QLabel(value)
+        self._val.setProperty("statNumber", True)
+        lay.addWidget(self._val)
+
+        self._lbl = QLabel(label)
+        self._lbl.setStyleSheet(
+            f"font-size: 11px; color: {tokens['text_low']}; "
+            f"font-weight: 500; background: transparent;"
+        )
+        lay.addWidget(self._lbl)
+
+        self._trend = QLabel(trend)
+        if trend:
+            self._trend.setStyleSheet(
+                f"font-size: 10px; color: {tokens['ok']}; "
+                f"font-weight: 600; background: transparent;"
+            )
+        else:
+            self._trend.setVisible(False)
+        lay.addWidget(self._trend)
+
+    def set_value(self, value: str) -> None:
+        self._val.setText(value)
+
+    def set_label(self, label: str) -> None:
+        self._lbl.setText(label)
+
+    def set_trend(self, trend: str, up: bool = True) -> None:
+        tokens = get_tokens()
+        self._trend.setText(trend)
+        self._trend.setVisible(bool(trend))
+        if trend:
+            self._trend.setStyleSheet(
+                f"font-size: 10px; color: {tokens['ok'] if up else tokens['danger']}; "
+                f"font-weight: 600; background: transparent;"
+            )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IMAGE PREVIEW CARD
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ImagePreviewCard(QFrame):
+    """Image result card with thumbnail, title, verification badge, and CLIP score.
+
+    Matches the layout defined in File 4 §5.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        tokens = get_tokens()
+        self.setObjectName("providerCard")
+        self.setFixedWidth(220)
+        self.setStyleSheet(
+            f"QFrame#providerCard {{ background-color: {tokens['bg_surface']}; "
+            f"border: 1px solid {tokens['border']}; border-radius: 14px; }}"
+        )
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+
+        # Thumbnail
+        self.thumb = QLabel()
+        self.thumb.setFixedHeight(120)
+        self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumb.setStyleSheet(
+            f"background-color: {tokens['bg_raised']}; "
+            f"border-radius: 8px; border: none;"
+        )
+        lay.addWidget(self.thumb)
+
+        # Title
+        self.title = QLabel("")
+        self.title.setWordWrap(True)
+        self.title.setMaximumHeight(32)
+        self.title.setStyleSheet(
+            f"font-size: 12px; font-weight: 600; color: {tokens['text_hi']}; "
+            f"background: transparent;"
+        )
+        lay.addWidget(self.title)
+
+        # Badge row
+        badge_row = QHBoxLayout()
+        badge_row.setContentsMargins(0, 0, 0, 0)
+        badge_row.setSpacing(6)
+        self.badge = QLabel("")
+        self.badge.setStyleSheet(
+            f"font-size: 10px; font-weight: 600; color: {tokens['accent']}; "
+            f"background: {tokens['accent_dim']}; border-radius: 4px; "
+            f"padding: 1px 6px;"
+        )
+        self.badge.setVisible(False)
+        badge_row.addWidget(self.badge)
+        badge_row.addStretch()
+        lay.addLayout(badge_row)
+
+        # CLIP score
+        self.clip = QLabel("")
+        self.clip.setStyleSheet(
+            f"font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace; "
+            f"font-size: 11px; color: {tokens['text_low']}; "
+            f"background: transparent; font-weight: 500;"
+        )
+        self.clip.setVisible(False)
+        lay.addWidget(self.clip)
+
+        # Attribution
+        self.attr = QLabel("")
+        self.attr.setWordWrap(True)
+        self.attr.setStyleSheet(
+            f"font-size: 10px; color: {tokens['text_low']}; "
+            f"background: transparent;"
+        )
+        self.attr.setVisible(False)
+        lay.addWidget(self.attr)
+
+        lay.addStretch()
+
+    def set_image(self, pixmap) -> None:
+        """Set the thumbnail pixmap, scaled to fit."""
+        scaled = pixmap.scaled(
+            200, 120,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.thumb.setPixmap(scaled)
+
+    def set_placeholder(self) -> None:
+        """Show a placeholder when no image is loaded."""
+        tokens = get_tokens()
+        self.thumb.setText("🖼")
+        self.thumb.setStyleSheet(
+            f"font-size: 32px; color: {tokens['text_disabled']}; "
+            f"background-color: {tokens['bg_raised']}; "
+            f"border-radius: 8px; border: none;"
+        )

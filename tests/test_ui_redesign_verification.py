@@ -29,17 +29,17 @@ class TestUIRedesign(unittest.TestCase):
     def test_01_theme_tokens_and_stylesheet(self):
         dark_tokens = get_tokens(dark=True)
         light_tokens = get_tokens(dark=False)
-        self.assertEqual(dark_tokens["bg_window"], "#080A10")
-        self.assertEqual(light_tokens["bg_window"], "#EEF2F7")
-        self.assertEqual(dark_tokens["accent"], "#00A3FF")
-        self.assertEqual(light_tokens["accent"], "#0070C0")
+        self.assertEqual(dark_tokens["bg_window"], "#0a0e14")
+        self.assertEqual(light_tokens["bg_window"], "#eef2f7")
+        self.assertEqual(dark_tokens["accent"], "#00b4d8")
+        self.assertEqual(light_tokens["accent"], "#0070c0")
         
         qss_dark = build_stylesheet(dark=True)
         qss_light = build_stylesheet(dark=False)
         self.assertIn("QDialog", qss_dark)
         self.assertIn("QTabWidget", qss_dark)
-        self.assertIn("#080A10", qss_dark)
-        self.assertIn("#EEF2F7", qss_light)
+        self.assertIn("#0a0e14", qss_dark)
+        self.assertIn("#eef2f7", qss_light)
 
     def test_02_ui_widgets_primitives(self):
         h = header_section("Title", "Subtitle", icon="⭐")
@@ -108,6 +108,11 @@ class TestUIRedesign(unittest.TestCase):
             "imagen_default_style": "cartoon",
             "imagen_default_size": "512x512",
             "imagen_fallback_to_search_providers": False,
+            # 🆕 v6.1 new providers
+            "smithsonian_api_key": "smithsonian_key_123",
+            "huggingface_api_token": "hf_token_123",
+            "noun_project_api_key": "noun_client_id_123",
+            "noun_project_api_secret": "noun_client_secret_123",
         }
         cd = ConfigDialog(existing_config=sample_cfg)
         saved = cd.get_config()
@@ -121,6 +126,11 @@ class TestUIRedesign(unittest.TestCase):
         self.assertEqual(saved["gemini_eval_api_key_1"], "eval1")
         self.assertEqual(saved["gemini_eval_api_key_7"], "eval7")
         self.assertEqual(saved["imagen_api_key"], "imagen_key_123")
+        # 🆕 v6.1 new providers verification
+        self.assertEqual(saved["smithsonian_api_key"], "smithsonian_key_123")
+        self.assertEqual(saved["huggingface_api_token"], "hf_token_123")
+        self.assertEqual(saved["noun_project_api_key"], "noun_client_id_123")
+        self.assertEqual(saved["noun_project_api_secret"], "noun_client_secret_123")
 
     def test_06_progress_dialog(self):
         pd = ProgressDialog(total_cards=100)

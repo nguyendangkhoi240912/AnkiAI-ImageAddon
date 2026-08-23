@@ -44,6 +44,7 @@ from aqt.qt import (
 )
 
 from .ui_theme import apply_dialog_theme, get_tokens, is_dark_mode, build_stylesheet
+from .ui_motion import fade_in, stagger_in, animate_progress, Motion
 from .ui_widgets import (
     header_section,
     settings_section,
@@ -61,6 +62,47 @@ from .ui_widgets import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# ENTRANCE ANIMATION HELPER
+# ============================================================================
+
+def _animate_entrance(dialog: QWidget) -> None:
+    """Fade+stagger direct children of a dialog's main layout on first show.
+
+    Runs once per dialog instance (guarded by ``_entrance_done``). Safe no-op
+    under reduced-motion config and if any animation step fails. Layout
+    spacers (stretch items) yield ``None`` widgets and are skipped.
+    """
+    if getattr(dialog, "_entrance_done", False):
+        return
+    dialog._entrance_done = True
+    try:
+        lay = dialog.layout()
+        if lay is None:
+            return
+        children = []
+        for i in range(lay.count()):
+            item = lay.itemAt(i)
+            if item is None:
+                continue
+            w = item.widget()
+            if w is not None:
+                children.append(w)
+                continue
+            # One level deeper: button rows added as sub-layouts
+            sub = item.layout()
+            if sub is not None:
+                for j in range(sub.count()):
+                    sw = sub.itemAt(j)
+                    if sw is not None and sw.widget() is not None:
+                        children.append(sw.widget())
+        if not children:
+            return
+        stagger_in(children, duration=Motion.ENTER, delay_step=Motion.STAGGER)
+    except Exception:
+        logger.warning("Entrance animation skipped", exc_info=True)
 
 
 # ============================================================================
@@ -188,7 +230,7 @@ class BatchOptionsDialog(QDialog):
         # Count display block
         count_block = QWidget()
         count_block.setStyleSheet(
-            f"QWidget {{ background-color: {tokens['bg_elevated']}; "
+            f"QWidget {{ background-color: {tokens['bg_surface']}; "
             f"border: 1px solid {tokens['border_accent']}; border-radius: 12px; }}"
         )
         count_block_layout = QVBoxLayout(count_block)
@@ -204,7 +246,7 @@ class BatchOptionsDialog(QDialog):
 
         type_lbl = QLabel("thẻ đã chọn")
         type_lbl.setStyleSheet(
-            f"font-size: 10px; font-weight: 600; color: {tokens['text_muted']}; "
+            f"font-size: 10px; font-weight: 600; color: {tokens['text_low']}; "
             f"background: transparent; letter-spacing: 0.8px; border: none;"
         )
         count_block_layout.addWidget(type_lbl)
@@ -245,7 +287,7 @@ class BatchOptionsDialog(QDialog):
 
             pend_num = QLabel(str(pending_count))
             pend_num.setStyleSheet(
-                f"font-size: 28px; font-weight: 800; color: {tokens['warning']}; "
+                f"font-size: 28px; font-weight: 800; color: {tokens['warn']}; "
                 f"background: transparent; border: none;"
             )
             p_row.addWidget(pend_num)
@@ -262,10 +304,10 @@ class BatchOptionsDialog(QDialog):
 
             self.pending_btn = QPushButton(f"▶  Tiếp tục ({pending_count} thẻ)")
             self.pending_btn.setStyleSheet(
-                f"QPushButton {{ background-color: {tokens['warning_bg']}; "
-                f"color: {tokens['warning']}; border: 1px solid {tokens['warning']}; "
+                f"QPushButton {{ background-color: {tokens['warn_dim']}; "
+                f"color: {tokens['warn']}; border: 1px solid {tokens['warn']}; "
                 f"border-radius: 8px; font-weight: 700; padding: 8px 18px; }}"
-                f"QPushButton:hover {{ background-color: {tokens['warning']}; color: #FFFFFF; }}"
+                f"QPushButton:hover {{ background-color: {tokens['warn']}; color: #FFFFFF; }}"
             )
             self.pending_btn.clicked.connect(self._accept_pending)
             p_row.addWidget(self.pending_btn)
@@ -300,6 +342,11 @@ class BatchOptionsDialog(QDialog):
     def _accept_pending(self):
         self.use_pending = True
         self.accept()
+
+    def showEvent(self, event):
+        """Staggered entrance animation on first display."""
+        super().showEvent(event)
+        _animate_entrance(self)
 
 
 # ============================================================================
@@ -480,6 +527,11 @@ class FieldSelectionDialog(QDialog):
         self.save_as_preset = self.remember_checkbox.isChecked()
         self.accept()
 
+    def showEvent(self, event):
+        """Staggered entrance animation on first display."""
+        super().showEvent(event)
+        _animate_entrance(self)
+
 
 # ============================================================================
 # 4. CONFIGURATION DIALOG
@@ -542,6 +594,11 @@ class ConfigDialog(QDialog):
         btn_row.addWidget(save_btn)
 
         main_layout.addLayout(btn_row)
+
+    def showEvent(self, event):
+        """Staggered entrance animation on first display."""
+        super().showEvent(event)
+        _animate_entrance(self)
 
     # ── TAB 1 — GENERAL ─────────────────────────────────────────────────────
     def _init_general_tab(self):
@@ -728,6 +785,42 @@ class ConfigDialog(QDialog):
             g_layout.addWidget(field)
         layout.addWidget(card_gif)
 
+        # 🆕 v6.1: New providers section
+        card_new, n_layout = settings_section(
+            title="Nguồn ảnh mới (v6.1)",
+            subtitle="21 nguồn ảnh mới: Wikipedia, Wikidata, Smithsonian, Iconify, Mermaid, QuickChart, Pollinations AI, v.v.",
+            icon="🆕"
+        )
+        
+        # Smithsonian (optional key for higher rate limit)
+        n_layout.addWidget(field_row("Smithsonian Open Access", "api.si.edu — Optional key for higher rate limit", badge="optional"))
+        self.smithsonian_input = credential_field("Smithsonian API Key (optional)")
+        n_layout.addWidget(self.smithsonian_input)
+        n_layout.addWidget(divider())
+        
+        # Noun Project (OAuth2 - required for full access)
+        n_layout.addWidget(field_row("Noun Project", "thenounproject.com — OAuth2 Client ID & Secret", badge="recommended"))
+        np_row = QHBoxLayout()
+        np_row.setSpacing(10)
+        self.noun_project_id_input = credential_field("Client ID")
+        self.noun_project_secret_input = credential_field("Client Secret")
+        np_row.addWidget(self.noun_project_id_input)
+        np_row.addWidget(self.noun_project_secret_input)
+        n_layout.addLayout(np_row)
+        n_layout.addWidget(divider())
+        
+        # HuggingFace (required for AI generation)
+        n_layout.addWidget(field_row("HuggingFace Inference", "huggingface.co — Required for AI image generation", badge="recommended"))
+        self.huggingface_input = credential_field("HuggingFace API Token")
+        n_layout.addWidget(self.huggingface_input)
+        n_layout.addWidget(divider())
+        
+        # Flickr (already exists in stock photos section, but mentioned in new providers)
+        n_layout.addWidget(field_row("Flickr CC-only", "flickr.com — Already configured in Stock Photos section", badge="info"))
+        # Note: Flickr key is already in the stock photos section, so we just show info
+        
+        layout.addWidget(card_new)
+
         test_btn = QPushButton("🔍  Kiểm tra tất cả nguồn ảnh")
         test_btn.clicked.connect(self.test_image_providers)
         layout.addWidget(test_btn)
@@ -910,6 +1003,10 @@ class ConfigDialog(QDialog):
             self.klipy_input.setText(self.existing_config.get("klipy_app_key", ""))
             self.giphy_input.setText(self.existing_config.get("giphy_api_key", ""))
             self.iconscout_input.setText(self.existing_config.get("iconscout_api_token", ""))
+            self.smithsonian_input.setText(self.existing_config.get("smithsonian_api_key", ""))
+            self.huggingface_input.setText(self.existing_config.get("huggingface_api_token", ""))
+            self.noun_project_id_input.setText(self.existing_config.get("noun_project_api_key", ""))
+            self.noun_project_secret_input.setText(self.existing_config.get("noun_project_api_secret", ""))
             self.enable_ai_eval_checkbox.setChecked(bool(self.existing_config.get("enable_ai_evaluation", True)))
             for i in range(1, 8):
                 key = self.existing_config.get(f"gemini_eval_api_key_{i}", "")
@@ -985,6 +1082,10 @@ class ConfigDialog(QDialog):
             "klipy_app_key": self.klipy_input.text().strip(),
             "giphy_api_key": self.giphy_input.text().strip(),
             "iconscout_api_token": self.iconscout_input.text().strip(),
+            "smithsonian_api_key": self.smithsonian_input.text().strip(),
+            "huggingface_api_token": self.huggingface_input.text().strip(),
+            "noun_project_api_key": self.noun_project_id_input.text().strip(),
+            "noun_project_api_secret": self.noun_project_secret_input.text().strip(),
             "enable_ai_evaluation": self.enable_ai_eval_checkbox.isChecked(),
             **eval_keys,
             "enable_rate_limit_protection": self.enable_rate_limit_checkbox.isChecked(),
@@ -1139,7 +1240,7 @@ class ConfigDialog(QDialog):
             row = QHBoxLayout()
             row.setSpacing(14)
 
-            icon_color = tokens["success"] if is_ok else tokens["danger"] if is_ok is False else tokens["text_muted"]
+            icon_color = tokens["ok"] if is_ok else tokens["danger"] if is_ok is False else tokens["text_low"]
             ic = QLabel("✓" if is_ok else "✗" if is_ok is False else "○")
             ic.setStyleSheet(f"font-size: 18px; font-weight: 800; color: {icon_color}; background: transparent; border: none;")
             ic.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -1316,8 +1417,8 @@ class ProgressDialog(QDialog):
         self.cancel_button.setText("Đang dừng…")
         self.state_badge.setText("⏸  Đã tạm dừng")
         self.state_badge.setStyleSheet(
-            f"color: {tokens['warning']}; background-color: {tokens['warning_bg']}; "
-            f"border: 1px solid {tokens['warning']}; border-radius: 5px; "
+            f"color: {tokens['warn']}; background-color: {tokens['warn_dim']}; "
+            f"border: 1px solid {tokens['warn']}; border-radius: 5px; "
             f"padding: 2px 9px; font-size: 11px; font-weight: 700;"
         )
         if self._on_cancel_callback:
@@ -1333,8 +1434,8 @@ class ProgressDialog(QDialog):
 
         self.state_badge.setText("✓  Hoàn tất")
         self.state_badge.setStyleSheet(
-            f"color: {tokens['success']}; background-color: {tokens['success_bg']}; "
-            f"border: 1px solid {tokens['success']}; border-radius: 5px; "
+            f"color: {tokens['ok']}; background-color: {tokens['ok_dim']}; "
+            f"border: 1px solid {tokens['ok']}; border-radius: 5px; "
             f"padding: 2px 9px; font-size: 11px; font-weight: 700;"
         )
 
@@ -1352,6 +1453,11 @@ class ProgressDialog(QDialog):
             pass
         self.cancel_button.clicked.connect(self.accept)
         self.update_stats(success_count, skipped_count, fail_count)
+
+    def showEvent(self, event):
+        """Staggered entrance animation on first display."""
+        super().showEvent(event)
+        _animate_entrance(self)
 
 
 # ============================================================================
@@ -1510,18 +1616,18 @@ class VerificationBadge(QLabel):
         if verified:
             self.setText("✓ QC-verified")
             self.setStyleSheet(
-                f"color: {tokens.get('success', '#4CAF50')}; "
-                f"background: {tokens.get('success_bg', '#1a2e1a')}; "
-                f"border: 1px solid {tokens.get('success', '#4CAF50')}; "
+                f"color: {tokens['ok']}; "
+                f"background: {tokens['ok_dim']}; "
+                f"border: 1px solid {tokens['ok']}; "
                 f"border-radius: 4px; padding: 1px 7px; font-size: 11px; "
                 f"font-weight: 600;"
             )
         else:
             self.setText("⚠ unverified")
             self.setStyleSheet(
-                f"color: {tokens.get('warning', '#FF9800')}; "
-                f"background: {tokens.get('warning_bg', '#2e2a1a')}; "
-                f"border: 1px solid {tokens.get('warning', '#FF9800')}; "
+                f"color: {tokens['warn']}; "
+                f"background: {tokens['warn_dim']}; "
+                f"border: 1px solid {tokens['warn']}; "
                 f"border-radius: 4px; padding: 1px 7px; font-size: 11px; "
                 f"font-weight: 600;"
             )
